@@ -5,26 +5,190 @@ use futures_util::StreamExt;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
+fn get_setting_value(conn: &rusqlite::Connection, key: &str) -> Option<String> {
+    conn.prepare("SELECT value FROM settings WHERE key = ?1")
+        .ok()?
+        .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
+        .ok()
+}
+
+fn read_setting(db: &Database, key: &str) -> Result<Option<String>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    Ok(get_setting_value(&conn, key))
+}
+
+fn extract_quick_sentence_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    for prefix in ["句子：", "句子:", "sentence:", "Sentence:"] {
+        if let Some(stripped) = trimmed.strip_prefix(prefix) {
+            return stripped.trim().to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn wrap_quick_sentence_translation(translation: String) -> TranslateResponse {
+    TranslateResponse {
+        result: json!({ "translation": translation }).to_string(),
+    }
+}
+
+fn extract_google_translation(body: &serde_json::Value) -> Option<String> {
+    let segments = body.get(0)?.as_array()?;
+    let mut text = String::new();
+    for segment in segments {
+        if let Some(part) = segment.get(0).and_then(|value| value.as_str()) {
+            text.push_str(part);
+        }
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn extract_deeplx_translation(body: &serde_json::Value) -> Option<String> {
+    body.get("data")
+        .and_then(|value| value.as_str())
+        .or_else(|| body.get("translation").and_then(|value| value.as_str()))
+        .or_else(|| {
+            body.get("translations")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("text"))
+                .and_then(|value| value.as_str())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+async fn translate_sentence_quick_with_google(
+    client: &reqwest::Client,
+    text: &str,
+) -> Result<TranslateResponse, String> {
+    let response = client
+        .get("https://translate.googleapis.com/translate_a/single")
+        .query(&[
+            ("client", "gtx"),
+            ("sl", "auto"),
+            ("tl", "zh-CN"),
+            ("dt", "t"),
+            ("q", text),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Google 翻译请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Google 翻译错误 ({}): {}", status, body));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Google 翻译响应解析失败: {}", e))?;
+    let translation = extract_google_translation(&body)
+        .ok_or("Google 翻译未返回可用译文".to_string())?;
+
+    Ok(wrap_quick_sentence_translation(translation))
+}
+
+async fn translate_sentence_quick_with_deeplx(
+    client: &reqwest::Client,
+    url: &str,
+    text: &str,
+) -> Result<TranslateResponse, String> {
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "text": text,
+            "source_lang": "auto",
+            "target_lang": "ZH"
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("DeepLX 请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("DeepLX 错误 ({}): {}", status, body));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("DeepLX 响应解析失败: {}", e))?;
+    let translation =
+        extract_deeplx_translation(&body).ok_or("DeepLX 未返回可用译文".to_string())?;
+
+    Ok(wrap_quick_sentence_translation(translation))
+}
+
+async fn maybe_translate_sentence_quick(
+    db: &Database,
+    req: &TranslateRequest,
+) -> Result<Option<TranslateResponse>, String> {
+    if req.prompt_type != "sentence_quick" {
+        return Ok(None);
+    }
+
+    let provider = read_setting(db, "quick_sentence_provider")?
+        .unwrap_or_else(|| "llm".to_string())
+        .trim()
+        .to_ascii_lowercase();
+
+    if provider == "llm" || provider.is_empty() {
+        return Ok(None);
+    }
+
+    let text = extract_quick_sentence_text(&req.text);
+    if text.is_empty() {
+        return Err("快速句译内容为空".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let translated = match provider.as_str() {
+        "google" => translate_sentence_quick_with_google(&client, &text).await?,
+        "deeplx" => {
+            let url = read_setting(db, "quick_sentence_deeplx_url")?
+                .unwrap_or_else(|| "http://127.0.0.1:1188/translate".to_string());
+            let trimmed = url.trim();
+            if trimmed.is_empty() {
+                return Err("DeepLX 地址未配置".to_string());
+            }
+            translate_sentence_quick_with_deeplx(&client, trimmed, &text).await?
+        }
+        _ => return Ok(None),
+    };
+
+    Ok(Some(translated))
+}
+
 #[tauri::command]
 pub async fn translate_text(
     db: State<'_, Database>,
     req: TranslateRequest,
 ) -> Result<TranslateResponse, String> {
+    if let Some(response) = maybe_translate_sentence_quick(&db, &req).await? {
+        return Ok(response);
+    }
+
     // Read API settings from DB
     let (api_key, api_url, model) = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-        let get_val = |key: &str| -> Option<String> {
-            conn.prepare("SELECT value FROM settings WHERE key = ?1")
-                .ok()?
-                .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
-                .ok()
-        };
-
-        let key = get_val("api_key").ok_or("API Key 未配置，请先在设置中配置")?;
-        let url = get_val("api_url")
+        let key = get_setting_value(&conn, "api_key").ok_or("API Key 未配置，请先在设置中配置")?;
+        let url = get_setting_value(&conn, "api_url")
             .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
-        let model = get_val("api_model").unwrap_or_else(|| "deepseek-chat".to_string());
+        let model =
+            get_setting_value(&conn, "api_model").unwrap_or_else(|| "deepseek-chat".to_string());
 
         (key, url, model)
     };
@@ -148,17 +312,11 @@ pub async fn test_api_connection(db: State<'_, Database>) -> Result<String, Stri
     let (api_key, api_url, model) = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-        let get_val = |key: &str| -> Option<String> {
-            conn.prepare("SELECT value FROM settings WHERE key = ?1")
-                .ok()?
-                .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
-                .ok()
-        };
-
-        let key = get_val("api_key").ok_or("API Key 未配置")?;
-        let url = get_val("api_url")
+        let key = get_setting_value(&conn, "api_key").ok_or("API Key 未配置")?;
+        let url = get_setting_value(&conn, "api_url")
             .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
-        let model = get_val("api_model").unwrap_or_else(|| "deepseek-chat".to_string());
+        let model =
+            get_setting_value(&conn, "api_model").unwrap_or_else(|| "deepseek-chat".to_string());
 
         (key, url, model)
     };
@@ -192,17 +350,10 @@ pub async fn test_api_connection(db: State<'_, Database>) -> Result<String, Stri
 fn read_api_settings(db: &Database) -> Result<(String, String, String), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-    let get_val = |key: &str| -> Option<String> {
-        conn.prepare("SELECT value FROM settings WHERE key = ?1")
-            .ok()?
-            .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
-            .ok()
-    };
-
-    let key = get_val("api_key").ok_or("API Key 未配置，请先在设置中配置")?;
-    let url = get_val("api_url")
+    let key = get_setting_value(&conn, "api_key").ok_or("API Key 未配置，请先在设置中配置")?;
+    let url = get_setting_value(&conn, "api_url")
         .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
-    let model = get_val("api_model").unwrap_or_else(|| "deepseek-chat".to_string());
+    let model = get_setting_value(&conn, "api_model").unwrap_or_else(|| "deepseek-chat".to_string());
 
     Ok((key, url, model))
 }

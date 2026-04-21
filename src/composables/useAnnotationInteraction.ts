@@ -146,7 +146,7 @@ export function useAnnotationInteraction(
             prompt_type: 'word_quick' as const,
           }
         : {
-            text: `句子：${text}`,
+            text,
             prompt_type: 'sentence_quick' as const,
           }
       const { result } = await translateText(req)

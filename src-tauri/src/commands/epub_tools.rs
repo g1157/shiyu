@@ -1,8 +1,8 @@
 // EPUB 提取工具
-use regex::Regex;
 use epub::doc::EpubDoc;
+use regex::Regex;
 use serde::Serialize;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -69,9 +69,7 @@ pub struct ChapterResult {
 }
 
 #[tauri::command]
-pub fn parse_epub_toc(
-    file_path: String,
-) -> Result<Vec<TocEntry>, String> {
+pub fn parse_epub_toc(file_path: String) -> Result<Vec<TocEntry>, String> {
     let mut doc = EpubDoc::new(&file_path).map_err(|e| format!("无法打开 EPUB 文件: {}", e))?;
 
     let toc = doc.toc.clone();
@@ -103,7 +101,9 @@ pub fn parse_epub_toc(
 
     if entries.is_empty() {
         let spine: Vec<String> = doc.spine.iter().map(|s| s.idref.clone()).collect();
-        let resources_snapshot: HashMap<String, (PathBuf, String)> = doc.resources.iter()
+        let resources_snapshot: HashMap<String, (PathBuf, String)> = doc
+            .resources
+            .iter()
             .map(|(k, v)| (k.clone(), (v.path.clone(), v.mime.clone())))
             .collect();
 
@@ -113,15 +113,23 @@ pub fn parse_epub_toc(
                 label = extract_best_title(&content);
             }
             if label.is_empty() {
-                label = resources_snapshot.get(spine_id)
+                label = resources_snapshot
+                    .get(spine_id)
                     .and_then(|r| r.0.file_stem().map(|s| s.to_string_lossy().to_string()))
                     .unwrap_or_else(|| format!("Chapter {}", i + 1));
             }
-            let path = resources_snapshot.get(spine_id)
+            let path = resources_snapshot
+                .get(spine_id)
                 .map(|r| r.0.to_string_lossy().to_string())
                 .unwrap_or_else(|| spine_id.clone());
 
-            entries.push(TocEntry { index: i, label, path, level: 0, children: Vec::new() });
+            entries.push(TocEntry {
+                index: i,
+                label,
+                path,
+                level: 0,
+                children: Vec::new(),
+            });
         }
     }
 
@@ -138,7 +146,9 @@ pub fn extract_epub_chapters(
     // 只打开一次EPUB文件
     let mut doc = EpubDoc::new(&file_path).map_err(|e| format!("无法打开 EPUB 文件: {}", e))?;
     let spine: Vec<String> = doc.spine.iter().map(|s| s.idref.clone()).collect();
-    let resources_snapshot: HashMap<String, (PathBuf, String)> = doc.resources.iter()
+    let resources_snapshot: HashMap<String, (PathBuf, String)> = doc
+        .resources
+        .iter()
         .map(|(k, v)| (k.clone(), (v.path.clone(), v.mime.clone())))
         .collect();
 
@@ -164,7 +174,7 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
     doc: &mut EpubDoc<R>,
     spine: &[String],
     resources_snapshot: &HashMap<String, (PathBuf, String)>,
-    chapter_path: &str
+    chapter_path: &str,
 ) -> Result<ChapterResult, String> {
     let chapter_path_clean = chapter_path.split('#').next().unwrap_or(chapter_path);
     let mut target_resource_id: Option<String> = None;
@@ -190,7 +200,9 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
     }
 
     let html_content = if let Some(ref res_id) = target_resource_id {
-        doc.get_resource_str(res_id).map(|(c, _)| c).unwrap_or_default()
+        doc.get_resource_str(res_id)
+            .map(|(c, _)| c)
+            .unwrap_or_default()
     } else {
         doc.get_current_str().map(|(c, _)| c).unwrap_or_default()
     };
@@ -207,7 +219,8 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
     let mut src_to_file_path: HashMap<String, String> = HashMap::new();
 
     let chapter_dir = if let Some(ref res_id) = target_resource_id {
-        resources_snapshot.get(res_id)
+        resources_snapshot
+            .get(res_id)
             .and_then(|(p, _)| p.parent().map(|pp| pp.to_path_buf()))
     } else {
         None
@@ -231,9 +244,12 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
 
         // Match by path
         for (res_id, (res_path, mime)) in resources_snapshot {
-            if !mime.starts_with("image/") { continue; }
+            if !mime.starts_with("image/") {
+                continue;
+            }
             let res_path_str = res_path.to_string_lossy().to_string();
-            let filename_match = res_path.file_name()
+            let filename_match = res_path
+                .file_name()
                 .and_then(|f| resolved.file_name().map(|rf| f == rf))
                 .unwrap_or(false);
 
@@ -243,7 +259,8 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
                 || filename_match
             {
                 if let Some((data, _)) = doc.get_resource(res_id) {
-                    let filename = res_path.file_name()
+                    let filename = res_path
+                        .file_name()
                         .map(|f| f.to_string_lossy().to_string())
                         .unwrap_or_else(|| format!("{}.png", res_id));
                     if let Ok(saved_path) = save_image_to_disk(&data, mime) {
@@ -251,7 +268,7 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
                         images.push(EpubImage {
                             filename,
                             mime_type: mime.clone(),
-                            data_base64: saved_path,  // reuse field to store file path
+                            data_base64: saved_path, // reuse field to store file path
                         });
                         found = true;
                     }
@@ -262,13 +279,17 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
 
         // Fallback: match by filename
         if !found {
-            let src_fn = Path::new(img_src).file_name()
+            let src_fn = Path::new(img_src)
+                .file_name()
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_default();
             if !src_fn.is_empty() {
                 for (res_id, (res_path, mime)) in resources_snapshot {
-                    if !mime.starts_with("image/") { continue; }
-                    let res_fn = res_path.file_name()
+                    if !mime.starts_with("image/") {
+                        continue;
+                    }
+                    let res_fn = res_path
+                        .file_name()
                         .map(|f| f.to_string_lossy().to_string())
                         .unwrap_or_default();
                     if res_fn == src_fn {
@@ -302,7 +323,11 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
     );
 
     let title = extract_best_title(&html_content);
-    let title = if title.is_empty() { chapter_path.to_string() } else { title };
+    let title = if title.is_empty() {
+        chapter_path.to_string()
+    } else {
+        title
+    };
 
     // Markdown for export (from processed HTML so it includes base64 data URIs)
     let mut markdown = html2md::parse_html(&processed_body);
@@ -327,7 +352,9 @@ pub fn extract_epub_chapter(
     // 只打开一次文件
     let mut doc = EpubDoc::new(&file_path).map_err(|e| format!("无法打开 EPUB 文件: {}", e))?;
     let spine: Vec<String> = doc.spine.iter().map(|s| s.idref.clone()).collect();
-    let resources_snapshot: HashMap<String, (PathBuf, String)> = doc.resources.iter()
+    let resources_snapshot: HashMap<String, (PathBuf, String)> = doc
+        .resources
+        .iter()
         .map(|(k, v)| (k.clone(), (v.path.clone(), v.mime.clone())))
         .collect();
 
@@ -340,16 +367,13 @@ pub fn extract_epub_chapter(
 /// If no body tag found, return the original HTML.
 fn extract_body_content(html: &str) -> String {
     // Try to find <body> or <body ...>
-    let body_start = html.find("<body")
-        .and_then(|pos| {
-            html[pos..].find('>').map(|gt| pos + gt + 1)
-        });
+    let body_start = html
+        .find("<body")
+        .and_then(|pos| html[pos..].find('>').map(|gt| pos + gt + 1));
     let body_end = html.rfind("</body>");
 
     match (body_start, body_end) {
-        (Some(start), Some(end)) if start < end => {
-            html[start..end].trim().to_string()
-        }
+        (Some(start), Some(end)) if start < end => html[start..end].trim().to_string(),
         _ => {
             // No body tags found — might be a fragment, return as-is
             html.to_string()
@@ -361,7 +385,9 @@ fn normalize_path(path: &Path) -> PathBuf {
     let mut components = Vec::new();
     for comp in path.components() {
         match comp {
-            std::path::Component::ParentDir => { components.pop(); }
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
             std::path::Component::CurDir => {}
             _ => components.push(comp),
         }
@@ -390,12 +416,20 @@ fn extract_image_paths(html: &str) -> Vec<String> {
 
 fn extract_best_title(html: &str) -> String {
     let generic_titles = [
-        "the economist", "economist", "untitled", "cover",
-        "table of contents", "contents", "titlepage", "title page",
+        "the economist",
+        "economist",
+        "untitled",
+        "cover",
+        "table of contents",
+        "contents",
+        "titlepage",
+        "title page",
     ];
     let is_generic = |t: &str| -> bool {
         let lower = t.to_lowercase();
-        generic_titles.iter().any(|g| lower == *g || lower.starts_with(g))
+        generic_titles
+            .iter()
+            .any(|g| lower == *g || lower.starts_with(g))
     };
 
     for heading_tag in &["h1", "h2", "h3"] {
@@ -450,26 +484,25 @@ fn extract_best_title(html: &str) -> String {
     String::new()
 }
 
-
 // Uses regex to smartly strip leading brackets, titles, and dates.
 fn intelligent_clean_markdown(markdown: &str, title: &str) -> String {
     let lines: Vec<&str> = markdown.lines().collect();
     let mut start_idx = 0;
-    
+
     // Patterns to look out for at the top of imported articles
     let brackets_pattern = Regex::new(r"^(?:(?:\[\]\(\))+|\[\])+\s*").unwrap();
     let date_pattern = Regex::new(r"(?i)^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+(AM|PM)").unwrap();
 
     let clean_title = title.trim().to_lowercase();
-    
+
     // We only check the first 20 lines for junk headers
     let check_limit = std::cmp::min(20, lines.len());
-    
+
     for i in 0..check_limit {
         let line = lines[i].trim();
         if line.is_empty() {
-             start_idx = i + 1;
-             continue;
+            start_idx = i + 1;
+            continue;
         }
 
         // 1. Remove empty brackets like []()[]()[]() or [][]
@@ -496,35 +529,41 @@ fn intelligent_clean_markdown(markdown: &str, title: &str) -> String {
             continue;
         }
 
-        // If after bracket removal there's still text, and it's not the title/date, 
+        // If after bracket removal there's still text, and it's not the title/date,
         // we probably hit the real content.
         if !cleaned_line.is_empty() {
-             // Check one special case: the line might contain the title AND the date consecutively
-             let line_lower = cleaned_line.to_lowercase();
-             if line_lower.starts_with(&clean_title) && line_lower.len() > clean_title.len() {
-                 let remainder = &cleaned_line[clean_title.len()..].trim();
-                 if date_pattern.is_match(remainder) {
-                      start_idx = i + 1;
-                      continue;
-                 }
-                 // If the remainder starts with | or - and then date
-                 if (remainder.starts_with('|') || remainder.starts_with('-')) && date_pattern.is_match(remainder[1..].trim()) {
-                      start_idx = i + 1;
-                      continue;
-                 }
-             }
-             
-             // Check if it's something like "Author name | Date"
-             if cleaned_line.contains('|') && date_pattern.is_match(cleaned_line.split('|').last().unwrap_or("").trim()) {
-                  start_idx = i + 1;
-                  continue;
-             }
-             if cleaned_line.contains('-') && date_pattern.is_match(cleaned_line.split('-').last().unwrap_or("").trim()) {
-                  start_idx = i + 1;
-                  continue;
-             }
+            // Check one special case: the line might contain the title AND the date consecutively
+            let line_lower = cleaned_line.to_lowercase();
+            if line_lower.starts_with(&clean_title) && line_lower.len() > clean_title.len() {
+                let remainder = &cleaned_line[clean_title.len()..].trim();
+                if date_pattern.is_match(remainder) {
+                    start_idx = i + 1;
+                    continue;
+                }
+                // If the remainder starts with | or - and then date
+                if (remainder.starts_with('|') || remainder.starts_with('-'))
+                    && date_pattern.is_match(remainder[1..].trim())
+                {
+                    start_idx = i + 1;
+                    continue;
+                }
+            }
 
-             break;
+            // Check if it's something like "Author name | Date"
+            if cleaned_line.contains('|')
+                && date_pattern.is_match(cleaned_line.split('|').last().unwrap_or("").trim())
+            {
+                start_idx = i + 1;
+                continue;
+            }
+            if cleaned_line.contains('-')
+                && date_pattern.is_match(cleaned_line.split('-').last().unwrap_or("").trim())
+            {
+                start_idx = i + 1;
+                continue;
+            }
+
+            break;
         }
     }
 

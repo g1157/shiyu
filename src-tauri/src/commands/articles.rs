@@ -2,8 +2,8 @@
 use crate::db::Database;
 use crate::models::{AddArticleRequest, ArticleItem, UpdateArticleContentRequest};
 use crate::repositories::article_repository::ArticleRepository;
-use crate::repositories::vocabulary_repository::VocabularyRepository;
 use crate::repositories::sentence_repository::SentenceRepository;
+use crate::repositories::vocabulary_repository::VocabularyRepository;
 use tauri::State;
 
 #[tauri::command]
@@ -23,10 +23,7 @@ pub fn get_article(id: String, db: State<Database>) -> Result<ArticleItem, Strin
 }
 
 #[tauri::command]
-pub fn add_article(
-    req: AddArticleRequest,
-    db: State<Database>,
-) -> Result<ArticleItem, String> {
+pub fn add_article(req: AddArticleRequest, db: State<Database>) -> Result<ArticleItem, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let repo = ArticleRepository::new();
     let article = repo.create(&conn, req).map_err(|e| e.to_string())?;
@@ -42,15 +39,22 @@ pub fn delete_article(id: String, db: State<Database>) -> Result<(), String> {
     let sentence_repo = SentenceRepository::new();
     let article_repo = ArticleRepository::new();
 
-    vocab_repo.delete_by_article(&conn, &id).map_err(|e| e.to_string())?;
-    sentence_repo.delete_by_article(&conn, &id).map_err(|e| e.to_string())?;
+    vocab_repo
+        .delete_by_article(&conn, &id)
+        .map_err(|e| e.to_string())?;
+    sentence_repo
+        .delete_by_article(&conn, &id)
+        .map_err(|e| e.to_string())?;
     article_repo.delete(&conn, &id).map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn update_article(req: UpdateArticleContentRequest, db: State<Database>) -> Result<ArticleItem, String> {
+pub fn update_article(
+    req: UpdateArticleContentRequest,
+    db: State<Database>,
+) -> Result<ArticleItem, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let repo = ArticleRepository::new();
     repo.update(&conn, req).map_err(|e| e.to_string())
@@ -70,7 +74,11 @@ pub fn get_article_mindmap(id: String, db: State<Database>) -> Result<Option<Str
 }
 
 #[tauri::command]
-pub fn save_article_mindmap(id: String, markdown: String, db: State<Database>) -> Result<(), String> {
+pub fn save_article_mindmap(
+    id: String,
+    markdown: String,
+    db: State<Database>,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE articles SET mindmap_markdown = ?1 WHERE id = ?2",

@@ -114,8 +114,7 @@ async fn download_and_save_image(
     image_index: usize,
 ) -> Result<String, String> {
     let images_dir = ocr_images_dir();
-    std::fs::create_dir_all(&images_dir)
-        .map_err(|e| format!("创建图片目录失败: {}", e))?;
+    std::fs::create_dir_all(&images_dir).map_err(|e| format!("创建图片目录失败: {}", e))?;
 
     // 从 URL 推断扩展名，默认 png
     let ext = url
@@ -130,7 +129,13 @@ async fn download_and_save_image(
         })
         .unwrap_or_else(|| "png".to_string());
 
-    let filename = format!("ocr_p{}_img{}_{}.{}", page_index, image_index, uuid::Uuid::new_v4().as_simple(), ext);
+    let filename = format!(
+        "ocr_p{}_img{}_{}.{}",
+        page_index,
+        image_index,
+        uuid::Uuid::new_v4().as_simple(),
+        ext
+    );
     let file_path = images_dir.join(&filename);
 
     let response = client
@@ -148,8 +153,7 @@ async fn download_and_save_image(
         .await
         .map_err(|e| format!("读取图片数据失败: {}", e))?;
 
-    std::fs::write(&file_path, &bytes)
-        .map_err(|e| format!("保存图片失败: {}", e))?;
+    std::fs::write(&file_path, &bytes).map_err(|e| format!("保存图片失败: {}", e))?;
 
     // 使用正斜杠，保证 Markdown 兼容性 + 前端 imageResolver 正则匹配
     Ok(file_path.to_string_lossy().to_string().replace('\\', "/"))
@@ -162,27 +166,28 @@ fn html_images_to_markdown(text: &str) -> String {
     let mut result = text.to_string();
 
     // 1. 匹配 <div...><img ...></div> 包裹的图片（PP-StructureV3 常见输出格式）
-    let div_img_re = Regex::new(
-        r#"<div[^>]*>\s*<img\s+[^>]*src=["']([^"']+)["'][^>]*>\s*</div>"#
-    ).unwrap();
+    let div_img_re =
+        Regex::new(r#"<div[^>]*>\s*<img\s+[^>]*src=["']([^"']+)["'][^>]*>\s*</div>"#).unwrap();
 
-    result = div_img_re.replace_all(&result, |caps: &regex::Captures| {
-        let src = &caps[1];
-        // 尝试提取 alt 属性
-        let alt = extract_img_alt(&caps[0]);
-        format!("![{}]({})", alt, src)
-    }).to_string();
+    result = div_img_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let src = &caps[1];
+            // 尝试提取 alt 属性
+            let alt = extract_img_alt(&caps[0]);
+            format!("![{}]({})", alt, src)
+        })
+        .to_string();
 
     // 2. 匹配剩余的独立 <img> 标签
-    let img_re = Regex::new(
-        r#"<img\s+[^>]*src=["']([^"']+)["'][^>]*>"#
-    ).unwrap();
+    let img_re = Regex::new(r#"<img\s+[^>]*src=["']([^"']+)["'][^>]*>"#).unwrap();
 
-    result = img_re.replace_all(&result, |caps: &regex::Captures| {
-        let src = &caps[1];
-        let alt = extract_img_alt(&caps[0]);
-        format!("![{}]({})", alt, src)
-    }).to_string();
+    result = img_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let src = &caps[1];
+            let alt = extract_img_alt(&caps[0]);
+            format!("![{}]({})", alt, src)
+        })
+        .to_string();
 
     result
 }
@@ -190,7 +195,8 @@ fn html_images_to_markdown(text: &str) -> String {
 /// 从 <img> 标签中提取 alt 属性值
 fn extract_img_alt(img_tag: &str) -> String {
     let alt_re = Regex::new(r#"alt=["']([^"']*)["']"#).unwrap();
-    alt_re.captures(img_tag)
+    alt_re
+        .captures(img_tag)
         .map(|c| c[1].to_string())
         .unwrap_or_default()
 }
@@ -225,8 +231,8 @@ pub async fn ocr_extract_pages(
         );
 
         // 读取图片并 base64 编码
-        let file_bytes = std::fs::read(path)
-            .map_err(|e| format!("读取图片失败 ({}): {}", path, e))?;
+        let file_bytes =
+            std::fs::read(path).map_err(|e| format!("读取图片失败 ({}): {}", path, e))?;
         let file_b64 = base64::engine::general_purpose::STANDARD.encode(&file_bytes);
 
         // 调用 PP-StructureV3 API
@@ -248,7 +254,12 @@ pub async fn ocr_extract_pages(
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("OCR API 错误 (第{}页, {}): {}", i + 1, status, body));
+            return Err(format!(
+                "OCR API 错误 (第{}页, {}): {}",
+                i + 1,
+                status,
+                body
+            ));
         }
 
         let pp_resp: PpStructureResponse = response
@@ -293,7 +304,12 @@ pub async fn ocr_extract_pages(
                 OcrProgress {
                     current: i + 1,
                     total,
-                    status: format!("正在下载第 {}/{} 页的 {} 张图片...", i + 1, total, all_images.len()),
+                    status: format!(
+                        "正在下载第 {}/{} 页的 {} 张图片...",
+                        i + 1,
+                        total,
+                        all_images.len()
+                    ),
                 },
             );
 

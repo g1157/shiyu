@@ -25,15 +25,12 @@ struct ConfigPack {
 /// 2. 解析 JSON → 逐项写入 settings 表
 /// 3. 返回成功导入的配置项数
 #[tauri::command]
-pub fn import_config_pack(
-    db: State<Database>,
-    file_path: String,
-) -> Result<u32, String> {
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("读取配置文件失败: {}", e))?;
+pub fn import_config_pack(db: State<Database>, file_path: String) -> Result<u32, String> {
+    let content =
+        std::fs::read_to_string(&file_path).map_err(|e| format!("读取配置文件失败: {}", e))?;
 
-    let pack: ConfigPack = serde_json::from_str(content.trim())
-        .map_err(|e| format!("配置文件内容格式错误: {}", e))?;
+    let pack: ConfigPack =
+        serde_json::from_str(content.trim()).map_err(|e| format!("配置文件内容格式错误: {}", e))?;
 
     if pack.v != 1 {
         return Err(format!("不支持的配置文件版本: v{}", pack.v));

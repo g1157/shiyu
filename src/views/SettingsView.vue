@@ -8,6 +8,8 @@ import VersionAnnouncement from '../components/VersionAnnouncement.vue'
 const apiKey = ref('')
 const apiUrl = ref('https://api.deepseek.com/v1/chat/completions')
 const apiModel = ref('deepseek-chat')
+const quickSentenceProvider = ref<'llm' | 'google' | 'deeplx'>('llm')
+const quickSentenceDeepLxUrl = ref('http://127.0.0.1:1188/translate')
 const saving = ref(false)
 const testing = ref(false)
 const message = ref('')
@@ -26,9 +28,15 @@ onMounted(async () => {
     const key = await getSetting('api_key')
     const url = await getSetting('api_url')
     const model = await getSetting('api_model')
+    const quickProvider = await getSetting('quick_sentence_provider')
+    const deepLxUrl = await getSetting('quick_sentence_deeplx_url')
     if (key) apiKey.value = key
     if (url) apiUrl.value = url
     if (model) apiModel.value = model
+    if (quickProvider === 'llm' || quickProvider === 'google' || quickProvider === 'deeplx') {
+      quickSentenceProvider.value = quickProvider
+    }
+    if (deepLxUrl) quickSentenceDeepLxUrl.value = deepLxUrl
     const ocrUrl = await getSetting('ocr_api_url')
     const ocrToken = await getSetting('ocr_api_token')
     if (ocrUrl) ocrApiUrl.value = ocrUrl
@@ -105,6 +113,8 @@ async function handleSave() {
     await setSetting('api_key', apiKey.value.trim())
     await setSetting('api_url', apiUrl.value.trim())
     await setSetting('api_model', apiModel.value.trim())
+    await setSetting('quick_sentence_provider', quickSentenceProvider.value)
+    await setSetting('quick_sentence_deeplx_url', quickSentenceDeepLxUrl.value.trim())
     await setSetting('ocr_api_url', ocrApiUrl.value.trim())
     await setSetting('ocr_api_token', ocrApiToken.value.trim())
     message.value = '✅ 设置已保存'
@@ -223,6 +233,29 @@ async function handleTest() {
           <div class="modal-field">
             <label>模型</label>
             <input v-model="apiModel" class="input" placeholder="deepseek-chat" />
+          </div>
+
+          <p class="modal-section-label" style="margin-top: 20px;">快速句译</p>
+          <div class="modal-field">
+            <label>提供商</label>
+            <select v-model="quickSentenceProvider" class="input input-select">
+              <option value="llm">LLM（沿用上方 API）</option>
+              <option value="google">Google Translate</option>
+              <option value="deeplx">DeepLX</option>
+            </select>
+            <p class="setting-hint">
+              只影响阅读器里的“快速查句”。查词、长难句解析、思维导图和正文静默翻译仍走上方 LLM 配置。
+            </p>
+          </div>
+          <div v-if="quickSentenceProvider === 'google'" class="modal-field">
+            <p class="setting-hint">
+              Google 方案使用内置的网页翻译接口，不需要额外 Key。
+            </p>
+          </div>
+          <div v-if="quickSentenceProvider === 'deeplx'" class="modal-field">
+            <label>DeepLX 地址</label>
+            <input v-model="quickSentenceDeepLxUrl" class="input" placeholder="http://127.0.0.1:1188/translate" />
+            <p class="setting-hint">填写你的 DeepLX `/translate` 接口地址。</p>
           </div>
 
           <p class="modal-section-label" style="margin-top: 20px;">OCR 识别</p>
@@ -454,6 +487,19 @@ async function handleTest() {
 }
 .modal-field .input:focus {
   background: rgba(0, 0, 0, 0.04);
+}
+.modal-field .input-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #86868b 50%),
+    linear-gradient(135deg, #86868b 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 12px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
 }
 .modal-field .setting-hint {
   margin-top: 4px;

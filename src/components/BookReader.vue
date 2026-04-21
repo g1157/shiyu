@@ -131,6 +131,262 @@ const progressPercent = computed(() =>
   Math.round(((currentEbook.value?.progress || 0) * 1000)) / 10
 )
 
+const BOOK_READER_THEME_NAME = 'app-book-theme'
+const BOOK_READER_THEME_CSS = String.raw`
+:root {
+  --c-text: #1D1D1F;
+  --c-text-lighter: #86868B;
+  --c-bg-light: #FFFFFF;
+  --c-bg-lighter: #F5F5F7;
+  --c-border: #E8E8ED;
+  --c-border-light: #F1F1F5;
+  --c-primary: #007AFF;
+  --c-primary-dark: #0066D6;
+  --font-serif: 'Georgia', 'Times New Roman', serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+}
+
+html {
+  background: var(--c-bg-light) !important;
+}
+
+body {
+  color: var(--c-text) !important;
+  background: var(--c-bg-light) !important;
+  font-family: var(--font-serif) !important;
+  font-size: 1.08rem !important;
+  line-height: 1.9 !important;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body p {
+  margin: 1rem 0 1.15rem !important;
+  color: inherit;
+  text-align: justify;
+}
+
+body h1,
+body h2,
+body h3,
+body h4,
+body h5,
+body h6 {
+  color: var(--c-text) !important;
+}
+
+body h1 {
+  margin: 2.5rem 0 1rem !important;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--c-border-light);
+  font-size: 1.8em !important;
+  font-weight: 800 !important;
+  line-height: 1.3 !important;
+  letter-spacing: -0.02em;
+}
+
+body h2 {
+  margin: 2.2rem 0 0.8rem !important;
+  padding-left: 14px;
+  border-left: 4px solid var(--c-primary);
+  font-size: 1.5em !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+}
+
+body h3 {
+  margin: 1.8rem 0 0.6rem !important;
+  font-size: 1.25em !important;
+  font-weight: 700 !important;
+  line-height: 1.4 !important;
+}
+
+body h4 {
+  margin: 1.5rem 0 0.5rem !important;
+  font-size: 1.1em !important;
+  font-weight: 600 !important;
+}
+
+body h5,
+body h6 {
+  margin: 1.2rem 0 0.4rem !important;
+  color: var(--c-text-lighter) !important;
+  font-size: 1em !important;
+  font-weight: 600 !important;
+}
+
+body img {
+  display: block !important;
+  max-width: 75% !important;
+  max-height: 500px !important;
+  height: auto !important;
+  margin: 1.5rem auto !important;
+  border-radius: 10px;
+  object-fit: contain;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+body figure {
+  margin: 1.5rem 0 !important;
+  text-align: center;
+}
+
+body figcaption {
+  margin-top: 0.6rem;
+  color: var(--c-text-lighter) !important;
+  font-size: 0.85em !important;
+  font-style: italic;
+}
+
+body blockquote {
+  margin: 1.5rem 0 !important;
+  padding: 1rem 1.5rem !important;
+  border-left: 4px solid var(--c-primary);
+  border-radius: 0 12px 12px 0;
+  background: linear-gradient(135deg, var(--c-bg-lighter), var(--c-bg-lighter)) !important;
+  color: var(--c-text-lighter) !important;
+  font-style: italic;
+}
+
+body blockquote p {
+  margin: 0.5rem 0 !important;
+}
+
+body ul,
+body ol {
+  margin: 1rem 0 !important;
+  padding-left: 1.8rem !important;
+}
+
+body ul {
+  list-style-type: disc !important;
+}
+
+body ol {
+  list-style-type: decimal !important;
+}
+
+body li {
+  margin: 0.4rem 0 !important;
+  color: inherit;
+  line-height: 1.8 !important;
+}
+
+body li > ul,
+body li > ol {
+  margin: 0.3rem 0 !important;
+}
+
+body code {
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--c-border-light), var(--c-border)) !important;
+  color: #e11d48 !important;
+  font-family: var(--font-mono) !important;
+  font-size: 0.88em !important;
+  word-break: break-word;
+}
+
+body pre {
+  margin: 1.5rem 0 !important;
+  padding: 1.2rem 1.5rem !important;
+  border: 1px solid var(--c-text);
+  border-radius: 12px;
+  background: var(--c-text) !important;
+  color: var(--c-border) !important;
+  overflow-x: auto;
+  font-size: 0.88em !important;
+  line-height: 1.6 !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+body pre code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent !important;
+  color: inherit !important;
+  font-size: 1em !important;
+}
+
+body table {
+  width: 100% !important;
+  margin: 1.5rem 0 !important;
+  border: 1px solid var(--c-border);
+  border-collapse: collapse;
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.92em !important;
+}
+
+body thead {
+  background: linear-gradient(135deg, var(--c-bg-lighter), var(--c-border-light)) !important;
+}
+
+body th {
+  padding: 10px 14px !important;
+  border-bottom: 2px solid var(--c-border);
+  color: var(--c-text) !important;
+  text-align: left;
+  font-weight: 700 !important;
+}
+
+body td {
+  padding: 10px 14px !important;
+  border-bottom: 1px solid var(--c-border-light);
+  color: var(--c-text-lighter) !important;
+}
+
+body tbody tr:nth-child(even) {
+  background: var(--c-bg-lighter) !important;
+}
+
+body hr {
+  height: 2px;
+  max-width: 120px;
+  margin: 2.5rem auto !important;
+  border: none;
+  background: linear-gradient(90deg, transparent, var(--c-border), transparent) !important;
+}
+
+body a {
+  color: var(--c-primary) !important;
+  border-bottom: 1px solid transparent;
+  text-decoration: none;
+}
+
+body a:hover {
+  color: var(--c-primary-dark) !important;
+  border-bottom-color: var(--c-primary);
+}
+
+body strong {
+  color: var(--c-text) !important;
+  font-weight: 700 !important;
+}
+
+body em {
+  color: var(--c-text-lighter) !important;
+  font-style: italic;
+}
+
+body mark {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, #fef3c7, #fde68a) !important;
+}
+
+body del {
+  color: var(--c-text-lighter) !important;
+}
+
+body sup,
+body sub {
+  font-size: 0.75em !important;
+}
+`
+
 const flatToc = computed<FlatTocNode[]>(() => {
   const walk = (nodes: TocNode[], depth = 0): FlatTocNode[] =>
     nodes.flatMap((node) => [
@@ -456,6 +712,18 @@ function currentLocationHref() {
   return null
 }
 
+function applyReaderTheme() {
+  if (!rendition?.themes) return
+
+  rendition.themes.registerCss(BOOK_READER_THEME_NAME, BOOK_READER_THEME_CSS)
+  rendition.themes.select(BOOK_READER_THEME_NAME)
+  rendition.themes.override('color', '#1D1D1F', true)
+  rendition.themes.override('background', '#FFFFFF', true)
+  rendition.themes.override('font-size', '1.08rem', true)
+  rendition.themes.override('line-height', '1.9', true)
+  rendition.themes.font("'Georgia', 'Times New Roman', serif")
+}
+
 function syncBookUpdate(updated: EbookItem) {
   currentEbook.value = updated
   emit('updated', updated)
@@ -633,13 +901,15 @@ async function initReader() {
     currentChapter.value = toc.value[0]?.label || ''
 
     rendition = bookInstance.renderTo(readerHostRef.value, {
+      manager: 'continuous',
       width: '100%',
       height: '100%',
-      flow: 'paginated',
+      flow: 'scrolled-continuous',
       spread: 'none',
       allowScriptedContent: true,
     })
 
+    applyReaderTheme()
     rendition.hooks.content.register((contents: any) => {
       attachContentInteraction(contents)
     })
@@ -886,6 +1156,7 @@ watch(
 .reader-layout {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  align-items: start;
   gap: 16px;
   min-height: calc(100vh - 180px);
 }
@@ -899,9 +1170,11 @@ watch(
 }
 
 .reader-toc {
+  align-self: start;
   border-radius: 18px;
   padding: 16px;
   overflow: auto;
+  max-height: calc(100vh - 180px);
 }
 
 .toc-header {

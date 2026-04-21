@@ -51,7 +51,10 @@ pub fn get_all_settings(db: State<Database>) -> Result<Vec<SettingItem>, String>
 #[tauri::command]
 pub fn delete_setting(db: State<Database>, key: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM settings WHERE key = ?1", rusqlite::params![key])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM settings WHERE key = ?1",
+        rusqlite::params![key],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }

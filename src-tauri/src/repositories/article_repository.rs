@@ -33,7 +33,7 @@ impl ArticleRepository {
         let mut stmt = conn.prepare(
             "SELECT id, title, '' as content, author, category, description, word_count, created_at
              FROM articles
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC",
         )?;
 
         let items = stmt
@@ -44,7 +44,11 @@ impl ArticleRepository {
     }
 
     /// 获取文章详情（包含content）
-    pub fn find_by_id(&self, conn: &MutexGuard<Connection>, id: &str) -> Result<Option<ArticleItem>> {
+    pub fn find_by_id(
+        &self,
+        conn: &MutexGuard<Connection>,
+        id: &str,
+    ) -> Result<Option<ArticleItem>> {
         let result = conn.query_row(
             "SELECT id, title, content, author, category, description, word_count, created_at
              FROM articles WHERE id = ?1",
@@ -60,7 +64,11 @@ impl ArticleRepository {
     }
 
     /// 添加文章
-    pub fn create(&self, conn: &MutexGuard<Connection>, req: AddArticleRequest) -> Result<ArticleItem> {
+    pub fn create(
+        &self,
+        conn: &MutexGuard<Connection>,
+        req: AddArticleRequest,
+    ) -> Result<ArticleItem> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
         let word_count = req.content.split_whitespace().count() as i64;
@@ -84,7 +92,11 @@ impl ArticleRepository {
     }
 
     /// 更新文章
-    pub fn update(&self, conn: &MutexGuard<Connection>, req: UpdateArticleContentRequest) -> Result<ArticleItem> {
+    pub fn update(
+        &self,
+        conn: &MutexGuard<Connection>,
+        req: UpdateArticleContentRequest,
+    ) -> Result<ArticleItem> {
         let word_count = req.content.split_whitespace().count() as i64;
 
         conn.execute(
@@ -92,10 +104,8 @@ impl ArticleRepository {
             rusqlite::params![req.title, req.content, word_count, req.id],
         )?;
 
-        self.find_by_id(conn, &req.id)?.map_or(
-            Err(rusqlite::Error::QueryReturnedNoRows),
-            Ok
-        )
+        self.find_by_id(conn, &req.id)?
+            .map_or(Err(rusqlite::Error::QueryReturnedNoRows), Ok)
     }
 
     /// 删除文章
@@ -106,11 +116,7 @@ impl ArticleRepository {
     /// 获取文章数量（预留：仪表盘统计）
     #[allow(dead_code)]
     pub fn count(&self, conn: &MutexGuard<Connection>) -> Result<i64> {
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM articles",
-            [],
-            |row| row.get(0)
-        )?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -120,7 +126,7 @@ impl ArticleRepository {
         let count: i64 = conn.query_row(
             "SELECT COALESCE(SUM(word_count), 0) FROM articles",
             [],
-            |row| row.get(0)
+            |row| row.get(0),
         )?;
         Ok(count)
     }
