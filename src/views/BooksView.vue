@@ -304,9 +304,9 @@ watch(() => route.fullPath, () => {
 }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  background: var(--c-glass-bg);
+  border: 1px solid var(--c-glass-border);
+  box-shadow: var(--c-shadow-lg);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getArticle, type ArticleItem } from '../services/api'
 import ContentEditorModal from './ContentEditorModal.vue'
@@ -11,6 +11,11 @@ import { useAnnotation } from '../composables/useAnnotation'
 import { useAnnotationInteraction } from '../composables/useAnnotationInteraction'
 import { useTranslation } from '../composables/useTranslation'
 import type { HighlightType } from '../composables/useRouteQuery'
+import {
+  buildInlineSentenceTranslationBlock,
+  isInlineSentenceTranslationBlock,
+  resolveInlineSentenceAnchor,
+} from '../utils/inlineSentenceTranslation'
 
 import SelectionPopover from './SelectionPopover.vue'
 import AnnotationForm from './AnnotationForm.vue'
@@ -50,6 +55,12 @@ const toastRef = ref<InstanceType<typeof Toast> | null>(null)
 const showEditor = ref(false)
 const showWordList = ref(false)
 const showMindMap = ref(false)
+const quickLookupPanelPosition = ref<{
+  top: number
+  left: number
+  sourceTop?: number
+  sourceBottom?: number
+} | null>(null)
 
 function openEditor() {
   showEditor.value = true
@@ -80,6 +91,35 @@ function handleWordListLocate(type: 'word' | 'sentence', id: string) {
   setTimeout(() => el.classList.remove('flashing'), 3200)
 }
 
+function updateQuickLookupPanelPosition() {
+  if (!quickLookupVisible.value || !quickLookupRange.value) {
+    quickLookupPanelPosition.value = quickLookupAnchor.value
+    return
+  }
+
+  const rect = quickLookupRange.value.getBoundingClientRect()
+  if (rect.width === 0 && rect.height === 0) {
+    quickLookupPanelPosition.value = quickLookupAnchor.value
+    return
+  }
+
+  const selectionType = quickLookupType.value || 'word'
+  let top = selectionType === 'sentence' ? rect.top : rect.top - 50
+  if (selectionType !== 'sentence' && top < 60) {
+    top = rect.bottom + 10
+  }
+
+  const left = selectionType === 'sentence'
+    ? Math.max(32, Math.min(window.innerWidth - 16, rect.right))
+    : Math.max(32, Math.min(window.innerWidth - 32, rect.left + rect.width / 2))
+  quickLookupPanelPosition.value = {
+    top,
+    left,
+    sourceTop: rect.top,
+    sourceBottom: rect.bottom,
+  }
+}
+
 // Composables
 const {
   selection,
@@ -95,6 +135,8 @@ const {
   clearExistingAnnotations,
   saveWord,
   saveSentence,
+  deleteWord,
+  deleteSentence,
   findWordById,
   findSentenceById,
 } = useAnnotation(readerBodyRef, currentArticleId)
@@ -109,10 +151,13 @@ const {
   quickLookupVisible,
   quickLookupType,
   quickLookupAnchor,
+  quickLookupRange,
   quickLookupSelectedText,
   quickLookupContextText,
   quickLookupWordPos,
   quickLookupMeaning,
+  quickLookupBaseMeaning,
+  quickLookupOtherMeanings,
   quickLookupTranslation,
   quickLookupParsedHtml,
   quickLookupStructureNote,
@@ -135,12 +180,15 @@ const {
   handleHighlightHover,
   handleHighlightLeave,
   handleTooltipClose,
+  handleTooltipEnter,
+  handleTooltipLeave,
+  handleTooltipRemove,
   handlePageClick,
 } = useAnnotationInteraction(
   router,
   toastRef,
   { selection, clearSelection, getContext, popoverPosition },
-  { annotationEnabled, findWordById, findSentenceById, saveWord, saveSentence },
+  { annotationEnabled, findWordById, findSentenceById, saveWord, saveSentence, deleteWord, deleteSentence },
 )
 
 import { resolveLocalImages, resolveLocalImagesInMarkdown } from '../utils/imageResolver'
@@ -189,6 +237,53 @@ let pendingHighlightType = ref<HighlightType | null>(null)
 let highlightRetryCount = 0
 const highlightRetryLimit = 8
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
+let inlineSentenceBlockEl: HTMLElement | null = null
+let inlineSentenceBlockCleanup: (() => void) | null = null
+
+function removeInlineSentenceTranslation() {
+  inlineSentenceBlockCleanup?.()
+  inlineSentenceBlockCleanup = null
+  inlineSentenceBlockEl?.remove()
+  inlineSentenceBlockEl = null
+}
+
+function expandSentenceTranslationInline() {
+  if (quickLookupType.value !== 'sentence' || !quickLookupTranslation.value.trim()) {
+    return
+  }
+
+  const anchor = resolveInlineSentenceAnchor(quickLookupRange.value)
+  if (!anchor || !readerBodyRef.value?.contains(anchor)) {
+    toastRef.value?.show('未找到原句位置，请重新选句')
+    return
+  }
+
+  removeInlineSentenceTranslation()
+
+  const block = buildInlineSentenceTranslationBlock(anchor.ownerDocument, {
+    translation: quickLookupTranslation.value,
+    parsedHtml: quickLookupParsedHtml.value,
+    structureNote: quickLookupStructureNote.value,
+  })
+  const closeButton = block.querySelector('.inline-sentence-translation__close') as HTMLButtonElement | null
+  const handleClose = (event: Event) => {
+    event.preventDefault()
+    removeInlineSentenceTranslation()
+  }
+  closeButton?.addEventListener('click', handleClose)
+  inlineSentenceBlockCleanup = () => closeButton?.removeEventListener('click', handleClose)
+
+  const next = anchor.nextElementSibling
+  if (isInlineSentenceTranslationBlock(next)) {
+    next.replaceWith(block)
+  } else {
+    anchor.insertAdjacentElement('afterend', block)
+  }
+
+  inlineSentenceBlockEl = block
+  block.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  closeQuickLookup()
+}
 
 function triggerHighlight() {
   if (!pendingHighlightId.value || !pendingHighlightType.value) return
@@ -249,6 +344,7 @@ function handleScroll() {
     const scrollHeight = el.scrollHeight - el.clientHeight
     readingProgress.value = scrollHeight > 0 ? Math.min((scrollTop / scrollHeight) * 100, 100) : 0
     showFloatingHeader.value = scrollTop > 200
+    updateQuickLookupPanelPosition()
   })
 }
 
@@ -257,6 +353,7 @@ function scrollToTop() {
 }
 
 function closeReader() {
+  removeInlineSentenceTranslation()
   clearSelection()
   clearExistingAnnotations()
   cleanupTranslation()
@@ -267,6 +364,7 @@ function closeReader() {
 
 // Initialize reader content
 async function initReader() {
+  removeInlineSentenceTranslation()
   // Fetch full article content
   try {
     const fullArticle = await getArticle(props.article.id)
@@ -302,20 +400,42 @@ onMounted(() => {
   initReader()
   getScrollContainer().addEventListener('scroll', handleScroll, { passive: true })
   document.addEventListener('mousedown', handlePageClick)
+  window.addEventListener('resize', updateQuickLookupPanelPosition)
 })
 
 onUnmounted(() => {
+  removeInlineSentenceTranslation()
   getScrollContainer().removeEventListener('scroll', handleScroll)
   document.removeEventListener('mousedown', handlePageClick)
+  window.removeEventListener('resize', updateQuickLookupPanelPosition)
   if (highlightTimer) clearTimeout(highlightTimer)
   if (scrollRafId !== null) cancelAnimationFrame(scrollRafId)
   scrollContainer = null
+})
+
+onActivated(() => {
+  void loadAnnotations().then(async () => {
+    clearExistingAnnotations()
+    await nextTick()
+    highlightAnnotatedContent()
+  })
 })
 
 // Watch for article change (e.g., route navigation while reader is open)
 watch(() => props.article.id, () => {
   initReader()
 })
+
+watch(
+  () => [quickLookupVisible.value, quickLookupSelectedText.value] as const,
+  () => {
+    if (!quickLookupVisible.value) {
+      quickLookupPanelPosition.value = null
+      return
+    }
+    nextTick(() => updateQuickLookupPanelPosition())
+  },
+)
 
 // Watch for highlight change on same article (e.g., vocab/sentences → 同一文章的不同标注)
 watch(() => props.highlightId, (newId) => {
@@ -536,12 +656,16 @@ watch(() => props.highlightId, (newId) => {
       :type="tooltipState.type"
       :position="tooltipState.position"
       @close="handleTooltipClose"
+      @hover-enter="handleTooltipEnter"
+      @hover-leave="handleTooltipLeave"
+      @remove="handleTooltipRemove"
     />
 
     <QuickLookupPanel
       :visible="quickLookupVisible"
       :type="quickLookupType"
-      :position="quickLookupAnchor"
+      :position="quickLookupPanelPosition || quickLookupAnchor"
+      :content-element="readerBodyRef"
       :selected-text="quickLookupSelectedText"
       :context-text="quickLookupContextText"
       :loading="quickLookupLoading"
@@ -551,12 +675,15 @@ watch(() => props.highlightId, (newId) => {
       :deep-error="quickLookupDeepError"
       :word-pos="quickLookupWordPos"
       :meaning="quickLookupMeaning"
+      :base-meaning="quickLookupBaseMeaning"
+      :other-meanings="quickLookupOtherMeanings"
       :translation="quickLookupTranslation"
       :parsed-html="quickLookupParsedHtml"
       :structure-note="quickLookupStructureNote"
       @close="closeQuickLookup"
       @retry="retryQuickLookup"
       @deepen="requestSentenceDeepAnalysis"
+      @inline="expandSentenceTranslationInline"
       @edit="openQuickLookupEditor"
       @save="saveQuickLookup"
     />

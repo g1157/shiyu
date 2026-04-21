@@ -153,6 +153,8 @@ function go(route: string) {
    ══════════════════════════════════════ */
 
 .dashboard {
+  width: 100%;
+  margin: 0 auto;
   padding: 28px 36px 48px;
   max-width: 960px;
   animation: fadeSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;

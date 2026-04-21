@@ -16,10 +16,15 @@ const emit = defineEmits<{
 }>()
 
 const style = computed(() => ({
+  '--popover-transform': props.position.anchor === 'tail'
+    ? 'translateX(-100%)'
+    : props.position.anchor === 'start'
+      ? 'none'
+      : 'translateX(-50%)',
   position: 'fixed' as const,
   top: `${props.position.top}px`,
   left: `${props.position.left}px`,
-  transform: 'translateX(-50%)',
+  transform: 'var(--popover-transform)',
   zIndex: 1000,
 }))
 
@@ -70,21 +75,21 @@ function handleAddSentence(e: Event) {
   display: flex;
   gap: 6px;
   padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--c-overlay-bg);
   backdrop-filter: blur(12px) saturate(120%);
   -webkit-backdrop-filter: blur(12px) saturate(120%);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+  border: 1px solid var(--c-overlay-border);
   border-radius: 10px;
   box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.08),
-    0 1px 3px rgba(0, 0, 0, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    0 4px 12px rgba(0, 0, 0, 0.14),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   animation: popIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @keyframes popIn {
-  0% { opacity: 0; transform: translateX(-50%) scale(0.85) translateY(8px); }
-  100% { opacity: 1; transform: translateX(-50%) scale(1) translateY(0); }
+  0% { opacity: 0; transform: var(--popover-transform) scale(0.85) translateY(8px); }
+  100% { opacity: 1; transform: var(--popover-transform) scale(1) translateY(0); }
 }
 
 .popover-btn {
@@ -112,4 +117,14 @@ function handleAddSentence(e: Event) {
   color: #1565c0;
 }
 .sentence-btn:hover { box-shadow: 0 4px 12px rgba(33, 150, 243, 0.35); }
+
+:global(html.dark) .word-btn {
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.22), rgba(21, 128, 61, 0.32));
+  color: #bbf7d0;
+}
+
+:global(html.dark) .sentence-btn {
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.24), rgba(29, 78, 216, 0.34));
+  color: #bfdbfe;
+}
 </style>

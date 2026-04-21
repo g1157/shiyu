@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>拾语 — 智能英语学习桌面应用</title>
-  <meta name="description" content="开源 AI 英语学习工具。文章阅读标注、句子成分解析、FSRS 间隔复习。基于 Tauri + Rust 构建，安装包仅 7MB。" />
+  <title>拾语增强版 — 图书书架与英语阅读桌面应用</title>
+  <meta name="description" content="基于上游拾语继续演进的增强版桌面发行线。支持 EPUB 图书书架、原生图书阅读器、非阻塞快查与 FSRS 复习。" />
   <link rel="icon" href="logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -27,8 +27,8 @@
     </a>
     <div class="nav-links">
       <a href="#features">功能</a>
-      <a href="https://github.com/amluckydave/shiyu">GitHub</a>
-      <a href="https://github.com/amluckydave/shiyu/releases" style="color:#fff">下载</a>
+      <a href="https://github.com/g1157/shiyu">当前仓库</a>
+      <a href="https://github.com/g1157/shiyu/releases" style="color:#fff">下载</a>
     </div>
   </nav>
 
@@ -36,13 +36,41 @@
   <div class="hero">
     <div class="hero-glow"></div>
     <img src="logo.png" alt="" class="hero-logo" />
-    <h1>拾语<span class="hero-dot">·</span>外刊精读利器</h1>
-    <p class="hero-sub">AI 非阻塞查词查句 · 长难句拆解 · FSRS 间隔复习</p>
+    <h1>拾语增强版<span class="hero-dot">·</span>图书阅读桌面应用</h1>
+    <p class="hero-sub">EPUB 图书书架 · AI 非阻塞查词查句 · 长难句拆解 · FSRS 间隔复习</p>
     <div class="hero-actions">
-      <a href="https://github.com/amluckydave/shiyu/releases" class="btn btn-primary">下载安装</a>
-      <a href="https://github.com/amluckydave/shiyu" class="btn btn-ghost">GitHub →</a>
+      <a href="https://github.com/g1157/shiyu/releases" class="btn btn-primary">下载安装</a>
+      <a href="https://github.com/g1157/shiyu" class="btn btn-ghost">当前仓库 →</a>
     </div>
   </div>
+
+  <section class="reveal">
+    <div class="container">
+      <p class="section-label">发行说明</p>
+      <h2 class="section-heading">当前页面展示的是增强版发行线</h2>
+      <p class="section-sub">
+        当前仓库 <code>g1157/shiyu</code> 基于上游 <code>amluckydave/shiyu</code> 持续演进，重点补强 EPUB 图书导入、书架、原生图书阅读器、
+        书内快查和阅读器主题体验。
+      </p>
+      <div class="grid-3">
+        <div class="card">
+          <span class="card-icon">📚</span>
+          <h3>图书优先</h3>
+          <p>EPUB 不再只按章节拆成文章，而是可以直接作为图书进入书架并保留阅读进度。</p>
+        </div>
+        <div class="card">
+          <span class="card-icon">🔖</span>
+          <h3>书内锚点</h3>
+          <p>句库和生词支持关联图书位置，回到阅读器时能直接跳回原书上下文。</p>
+        </div>
+        <div class="card">
+          <span class="card-icon">🎛️</span>
+          <h3>阅读器增强</h3>
+          <p>目录交互、深浅色主题、侧边快译与图书页布局均按原版书阅读场景重做过一轮。</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <!-- Demo  -->
   <section class="reveal">
@@ -120,8 +148,8 @@
         </div>
         <div class="card">
           <span class="card-icon">📚</span>
-          <h3>EPUB & OCR 导入</h3>
-          <p>EPUB 按章节提取，OCR 识别 + AI 校正</p>
+          <h3>EPUB 图书书架 & OCR 导入</h3>
+          <p>EPUB 直接进入图书书架，保留目录与进度；OCR 识别 + AI 校正</p>
         </div>
       </div>
     </div>
@@ -152,13 +180,13 @@
     <h2>开始你的英语学习之旅</h2>
     <p>开源免费 · 隐私安全 · Windows & macOS</p>
     <div class="hero-actions" style="justify-content:center">
-      <a href="https://github.com/amluckydave/shiyu/releases" class="btn btn-primary">下载安装</a>
-      <a href="https://github.com/amluckydave/shiyu" class="btn btn-ghost">Star on GitHub →</a>
+      <a href="https://github.com/g1157/shiyu/releases" class="btn btn-primary">下载安装</a>
+      <a href="https://github.com/g1157/shiyu" class="btn btn-ghost">Star on GitHub →</a>
     </div>
   </div>
 
   <footer>
-    MIT © 2026 <a href="https://github.com/amluckydave">amluckydave</a> · <a href="https://linux.do/" target="_blank">LINUX DO</a>
+    MIT © 2026 <a href="https://github.com/g1157">g1157</a> · upstream <a href="https://github.com/amluckydave/shiyu">amluckydave/shiyu</a> · <a href="https://linux.do/" target="_blank">LINUX DO</a>
   </footer>
 
   <script>

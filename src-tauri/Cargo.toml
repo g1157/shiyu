@@ -1,6 +1,6 @@
 [package]
 name = "shiyu-desktop"
-version = "0.2.3"
+version = "0.2.4"
 description = "拾语 - 智能双语英语学习桌面应用"
 authors = ["amluckydave"]
 edition = "2021"

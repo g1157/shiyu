@@ -6,6 +6,8 @@ import ePub from 'epubjs'
 import {
   addSentence,
   addVocabulary,
+  deleteSentence as deleteSentenceApi,
+  deleteVocabulary as deleteVocabularyApi,
   getEbook,
   getSentencesByEbook,
   getVocabularyByEbook,
@@ -15,6 +17,7 @@ import {
   type VocabularyItem,
 } from '../services/api'
 import AnnotationForm from './AnnotationForm.vue'
+import AnnotationTooltip from './AnnotationTooltip.vue'
 import QuickLookupPanel from './QuickLookupPanel.vue'
 import SelectionPopover from './SelectionPopover.vue'
 import { useAnnotationInteraction } from '../composables/useAnnotationInteraction'
@@ -23,16 +26,46 @@ import type { PopoverPosition, SelectionState } from '../composables/useTextSele
 import type { HighlightType } from '../composables/useRouteQuery'
 import { preCacheText } from '../services/ttsCache'
 import { useAppStore } from '../stores/appStore'
+import { useSettingsStore } from '../stores/settingsStore'
+import {
+  buildInlineSentenceTranslationBlock,
+  isInlineSentenceTranslationBlock,
+  resolveInlineSentenceAnchor,
+} from '../utils/inlineSentenceTranslation'
 
 interface TocNode {
+  uid: string
   id?: string
   label: string
   href: string
   subitems: TocNode[]
 }
 
-interface FlatTocNode extends TocNode {
+interface VisibleTocNode extends TocNode {
   depth: number
+  expanded: boolean
+  hasChildren: boolean
+}
+
+interface BookAnnotationEntry {
+  cfi: string
+  type: 'highlight' | 'underline'
+  annotationId: string
+  annotationType: HighlightType
+  annotation: {
+    mark?: {
+      element?: Element | null
+      getBoundingClientRect?: () => DOMRect
+      getClientRects?: () => DOMRect[]
+    } | null
+  } | null
+  mark: {
+    element?: Element | null
+    getBoundingClientRect?: () => DOMRect
+    getClientRects?: () => DOMRect[]
+  } | null
+  idleAttrs: Record<string, string>
+  hoverAttrs: Record<string, string>
 }
 
 const props = defineProps<{
@@ -50,12 +83,15 @@ const emit = defineEmits<{
 const router = useRouter()
 const toast = useGlobalToast()
 const appStore = useAppStore()
+const settingsStore = useSettingsStore()
+const TOC_PANEL_STORAGE_KEY = 'shiyu:book-reader:toc-visible:v2'
 const readerHostRef = ref<HTMLElement | null>(null)
 const currentEbook = ref<EbookItem | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 const toc = ref<TocNode[]>([])
-const showToc = ref(true)
+const expandedTocKeys = ref<Record<string, boolean>>({})
+const showToc = ref(readStoredTocVisibility())
 const currentChapter = ref('')
 const annotationEnabled = ref(true)
 const vocabulary = ref<VocabularyItem[]>([])
@@ -79,19 +115,29 @@ const popoverPosition = ref<PopoverPosition>({
 const selectedContextText = ref('')
 const selectedCfi = ref<string | null>(null)
 const selectedHref = ref<string | null>(null)
+const quickLookupPanelPosition = ref<{
+  top: number
+  left: number
+  sourceTop?: number
+  sourceBottom?: number
+} | null>(null)
 const {
   showAnnotationForm,
   annotationType,
   cachedSelectedText,
   cachedContextText,
   annotationDraft,
+  tooltipState,
   quickLookupVisible,
   quickLookupType,
   quickLookupAnchor,
+  quickLookupRange,
   quickLookupSelectedText,
   quickLookupContextText,
   quickLookupWordPos,
   quickLookupMeaning,
+  quickLookupBaseMeaning,
+  quickLookupOtherMeanings,
   quickLookupTranslation,
   quickLookupParsedHtml,
   quickLookupStructureNote,
@@ -109,11 +155,16 @@ const {
   requestSentenceDeepAnalysis,
   openQuickLookupEditor,
   saveQuickLookup,
+  handleTooltipClose,
+  handleTooltipEnter,
+  handleTooltipLeave,
+  handleTooltipRemove,
+  showTooltipForAnnotation,
 } = useAnnotationInteraction(
   router,
   toastRef,
   { selection, clearSelection, getContext, popoverPosition },
-  { annotationEnabled, findWordById, findSentenceById, saveWord, saveSentence },
+  { annotationEnabled, findWordById, findSentenceById, saveWord, saveSentence, deleteWord, deleteSentence },
 )
 
 let bookInstance: any = null
@@ -122,26 +173,184 @@ let progressTimer: ReturnType<typeof setTimeout> | null = null
 let pendingProgress = 0
 let pendingCfi: string | undefined
 let contentCleanupFns: Array<() => void> = []
-let renderedAnnotations: Array<{ cfi: string; type: 'highlight' | 'underline' }> = []
+let renderedAnnotations: BookAnnotationEntry[] = []
+let hoveredAnnotationKey: string | null = null
 const activeHighlightId = ref<string | null>(null)
 const activeHighlightType = ref<HighlightType | null>(null)
 let highlightResetTimer: ReturnType<typeof setTimeout> | null = null
+let inlineSentenceBlockEl: HTMLElement | null = null
+let inlineSentenceBlockCleanup: (() => void) | null = null
+let shellScrollContainer: HTMLElement | null = null
+let locationsReady = false
+let locationsGenerationPromise: Promise<void> | null = null
 
 const progressPercent = computed(() =>
   Math.round(((currentEbook.value?.progress || 0) * 1000)) / 10
 )
+const currentTheme = computed<'light' | 'dark'>(() => (settingsStore.theme === 'dark' ? 'dark' : 'light'))
 
 const BOOK_READER_THEME_NAME = 'app-book-theme'
-const BOOK_READER_THEME_CSS = String.raw`
+const registeredReaderThemes = new Set<string>()
+
+function getBookReaderPalette(mode: 'light' | 'dark') {
+  if (mode === 'dark') {
+    return {
+      text: '#DED7CC',
+      textLighter: '#AEA79A',
+      bgLight: '#171411',
+      bgLighter: '#1F1B18',
+      border: '#3A332D',
+      borderLight: '#2A241F',
+      primary: '#93CFF1',
+      primaryDark: '#B4E1FA',
+      codeText: '#FB7185',
+      preBg: '#12100E',
+      preText: '#E1D9CF',
+      quoteBg: 'linear-gradient(135deg, rgba(196, 181, 159, 0.10), rgba(148, 163, 184, 0.06))',
+      tableHead: 'linear-gradient(135deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015))',
+      tableAlt: 'rgba(255, 255, 255, 0.018)',
+      markStart: '#594618',
+      markEnd: '#886314',
+      predicate: '#BAE6FD',
+      nonfinite: '#C084FC',
+      connector: '#F87171',
+      structure: '#34D399',
+      symbol: '#F59E0B',
+      inlineBorder: 'rgba(180, 204, 220, 0.22)',
+      inlineBgStart: 'rgba(36, 31, 27, 0.96)',
+      inlineBgEnd: 'rgba(24, 21, 18, 0.98)',
+      inlineShadow: '0 8px 24px rgba(2, 6, 23, 0.32)',
+      badgeBg: 'rgba(147, 207, 241, 0.16)',
+      badgeText: '#D8EEF9',
+      closeText: '#AAA18F',
+      translationText: '#E4DCCF',
+      parsedBg: 'rgba(26, 22, 19, 0.84)',
+      parsedBorder: 'rgba(111, 101, 90, 0.48)',
+      parsedText: '#E5DDD0',
+      note: '#C084FC',
+      imageShadow: '0 4px 20px rgba(0, 0, 0, 0.28)',
+      preShadow: '0 4px 16px rgba(0, 0, 0, 0.24)',
+    }
+  }
+
+  return {
+    text: '#1D1D1F',
+    textLighter: '#86868B',
+    bgLight: '#FFFFFF',
+    bgLighter: '#F5F5F7',
+    border: '#E8E8ED',
+    borderLight: '#F1F1F5',
+    primary: '#007AFF',
+    primaryDark: '#0066D6',
+    codeText: '#E11D48',
+    preBg: '#1D1D1F',
+    preText: '#E8E8ED',
+    quoteBg: 'linear-gradient(135deg, #F5F5F7, #F5F5F7)',
+    tableHead: 'linear-gradient(135deg, #F5F5F7, #F1F1F5)',
+    tableAlt: '#F5F5F7',
+    markStart: '#FEF3C7',
+    markEnd: '#FDE68A',
+    predicate: '#2563EB',
+    nonfinite: '#7C3AED',
+    connector: '#DC2626',
+    structure: '#059669',
+    symbol: '#E07B39',
+    inlineBorder: 'rgba(191, 219, 254, 0.88)',
+    inlineBgStart: 'rgba(239, 246, 255, 0.96)',
+    inlineBgEnd: 'rgba(248, 250, 252, 0.98)',
+    inlineShadow: '0 8px 24px rgba(37, 99, 235, 0.08)',
+    badgeBg: 'rgba(37, 99, 235, 0.12)',
+    badgeText: '#2563EB',
+    closeText: '#64748B',
+    translationText: '#1E293B',
+    parsedBg: 'rgba(255, 255, 255, 0.72)',
+    parsedBorder: 'rgba(226, 232, 240, 0.9)',
+    parsedText: '#0F172A',
+    note: '#7C3AED',
+    imageShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
+    preShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
+  }
+}
+
+function getBookReaderThemeName(mode: 'light' | 'dark') {
+  return `${BOOK_READER_THEME_NAME}-${mode}`
+}
+
+function buildBookReaderInlineOverrideCss(mode: 'light' | 'dark') {
+  const palette = getBookReaderPalette(mode)
+  const linkColor = palette.primaryDark
+
+  return String.raw`
+html, body {
+  background: ${palette.bgLight} !important;
+}
+
+body,
+body p,
+body li,
+body dd,
+body dt,
+body div,
+body span,
+body section,
+body article,
+body main,
+body [style*="color"],
+body font[color] {
+  color: ${palette.text} !important;
+  -webkit-text-fill-color: ${palette.text};
+}
+
+body h1,
+body h2,
+body h3,
+body h4,
+body h5,
+body h6,
+body strong,
+body b {
+  color: ${palette.text} !important;
+  -webkit-text-fill-color: ${palette.text};
+}
+
+body figcaption,
+body small,
+body td,
+body th,
+body blockquote,
+body em,
+body del {
+  color: ${palette.textLighter} !important;
+  -webkit-text-fill-color: ${palette.textLighter};
+}
+
+body a,
+body a:link,
+body a:visited,
+body a:hover,
+body a:active,
+body a *,
+body a font[color],
+body a [style*="color"] {
+  color: ${linkColor} !important;
+  -webkit-text-fill-color: ${linkColor};
+}
+`
+}
+
+function buildBookReaderThemeCss(mode: 'light' | 'dark') {
+  const palette = getBookReaderPalette(mode)
+
+  return String.raw`
 :root {
-  --c-text: #1D1D1F;
-  --c-text-lighter: #86868B;
-  --c-bg-light: #FFFFFF;
-  --c-bg-lighter: #F5F5F7;
-  --c-border: #E8E8ED;
-  --c-border-light: #F1F1F5;
-  --c-primary: #007AFF;
-  --c-primary-dark: #0066D6;
+  --c-text: ${palette.text};
+  --c-text-lighter: ${palette.textLighter};
+  --c-bg-light: ${palette.bgLight};
+  --c-bg-lighter: ${palette.bgLighter};
+  --c-border: ${palette.border};
+  --c-border-light: ${palette.borderLight};
+  --c-primary: ${palette.primary};
+  --c-primary-dark: ${palette.primaryDark};
   --font-serif: 'Georgia', 'Times New Roman', serif;
   --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
 }
@@ -154,12 +363,26 @@ body {
   color: var(--c-text) !important;
   background: var(--c-bg-light) !important;
   font-family: var(--font-serif) !important;
-  font-size: 1.08rem !important;
-  line-height: 1.9 !important;
+  font-size: 1.13rem !important;
+  line-height: 1.98 !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.006em;
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+body div,
+body span,
+body section,
+body article,
+body main,
+body p,
+body li,
+body dd,
+body dt {
+  color: var(--c-text) !important;
 }
 
 body p {
@@ -225,7 +448,7 @@ body img {
   margin: 1.5rem auto !important;
   border-radius: 10px;
   object-fit: contain;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  box-shadow: ${palette.imageShadow};
 }
 
 body figure {
@@ -245,7 +468,7 @@ body blockquote {
   padding: 1rem 1.5rem !important;
   border-left: 4px solid var(--c-primary);
   border-radius: 0 12px 12px 0;
-  background: linear-gradient(135deg, var(--c-bg-lighter), var(--c-bg-lighter)) !important;
+  background: ${palette.quoteBg} !important;
   color: var(--c-text-lighter) !important;
   font-style: italic;
 }
@@ -283,7 +506,7 @@ body code {
   padding: 2px 7px;
   border-radius: 5px;
   background: linear-gradient(135deg, var(--c-border-light), var(--c-border)) !important;
-  color: #e11d48 !important;
+  color: ${palette.codeText} !important;
   font-family: var(--font-mono) !important;
   font-size: 0.88em !important;
   word-break: break-word;
@@ -292,14 +515,14 @@ body code {
 body pre {
   margin: 1.5rem 0 !important;
   padding: 1.2rem 1.5rem !important;
-  border: 1px solid var(--c-text);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: var(--c-text) !important;
-  color: var(--c-border) !important;
+  background: ${palette.preBg} !important;
+  color: ${palette.preText} !important;
   overflow-x: auto;
   font-size: 0.88em !important;
   line-height: 1.6 !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: ${palette.preShadow};
 }
 
 body pre code {
@@ -321,7 +544,7 @@ body table {
 }
 
 body thead {
-  background: linear-gradient(135deg, var(--c-bg-lighter), var(--c-border-light)) !important;
+  background: ${palette.tableHead} !important;
 }
 
 body th {
@@ -339,7 +562,7 @@ body td {
 }
 
 body tbody tr:nth-child(even) {
-  background: var(--c-bg-lighter) !important;
+  background: ${palette.tableAlt} !important;
 }
 
 body hr {
@@ -351,14 +574,26 @@ body hr {
 }
 
 body a {
-  color: var(--c-primary) !important;
-  border-bottom: 1px solid transparent;
-  text-decoration: none;
+  color: var(--c-primary-dark) !important;
+  border-bottom: none !important;
+  text-decoration: underline !important;
+  text-decoration-color: currentColor !important;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+  font-weight: 700;
 }
 
 body a:hover {
-  color: var(--c-primary-dark) !important;
-  border-bottom-color: var(--c-primary);
+  color: #D9F0FF !important;
+  text-decoration-color: currentColor !important;
+}
+
+body a *,
+body a:link *,
+body a:visited *,
+body a:hover *,
+body a:active * {
+  color: inherit !important;
 }
 
 body strong {
@@ -371,10 +606,17 @@ body em {
   font-style: italic;
 }
 
+body figcaption,
+body td,
+body del {
+  color: var(--c-text-lighter) !important;
+}
+
 body mark {
   padding: 1px 4px;
   border-radius: 3px;
-  background: linear-gradient(135deg, #fef3c7, #fde68a) !important;
+  background: linear-gradient(135deg, ${palette.markStart}, ${palette.markEnd}) !important;
+  color: inherit !important;
 }
 
 body del {
@@ -385,14 +627,128 @@ body sup,
 body sub {
   font-size: 0.75em !important;
 }
-`
 
-const flatToc = computed<FlatTocNode[]>(() => {
-  const walk = (nodes: TocNode[], depth = 0): FlatTocNode[] =>
-    nodes.flatMap((node) => [
-      { ...node, depth },
-      ...walk(node.subitems, depth + 1),
-    ])
+.ps-predicate { color: ${palette.predicate}; font-weight: 700; }
+
+.ps-nonfinite {
+  color: ${palette.nonfinite};
+  text-decoration: underline;
+  text-decoration-style: wavy;
+  text-underline-offset: 3px;
+}
+
+.ps-connector { color: ${palette.connector}; font-weight: 600; }
+.ps-italic { font-style: italic; }
+.ps-main { font-weight: 700; }
+.ps-structure { color: ${palette.structure}; font-weight: 600; }
+.ps-symbol { color: ${palette.symbol}; font-weight: 800; font-family: var(--font-mono); }
+
+.parsed-html-content {
+  line-height: 2.1;
+  font-family: var(--font-serif);
+}
+
+.inline-sentence-translation {
+  margin: 0.85rem 0 1.15rem !important;
+  padding: 12px 14px 14px !important;
+  border: 1px solid ${palette.inlineBorder};
+  border-radius: 14px;
+  background: linear-gradient(180deg, ${palette.inlineBgStart}, ${palette.inlineBgEnd}) !important;
+  box-shadow: ${palette.inlineShadow};
+}
+
+.inline-sentence-translation__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.inline-sentence-translation__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: ${palette.badgeBg};
+  color: ${palette.badgeText} !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.01em;
+}
+
+.inline-sentence-translation__close {
+  border: none;
+  background: transparent;
+  color: ${palette.closeText} !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+}
+
+.inline-sentence-translation__translation {
+  font-size: 0.98rem !important;
+  line-height: 1.9 !important;
+  color: ${palette.translationText} !important;
+}
+
+.inline-sentence-translation__parsed {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: ${palette.parsedBg} !important;
+  border: 1px solid ${palette.parsedBorder};
+  font-size: 0.95rem !important;
+  color: ${palette.parsedText} !important;
+}
+
+.inline-sentence-translation__note {
+  margin-top: 8px;
+  font-size: 0.84rem !important;
+  line-height: 1.65 !important;
+  color: ${palette.note} !important;
+  font-style: italic;
+}
+`
+}
+
+function applyInlineThemeOverride(contents: any) {
+  const mode = currentTheme.value
+  const palette = getBookReaderPalette(mode)
+  const doc = contents?.document as Document | undefined
+  if (!doc) return
+
+  doc.documentElement?.style?.setProperty('background', palette.bgLight, 'important')
+  doc.body?.style?.setProperty('background', palette.bgLight, 'important')
+  doc.body?.style?.setProperty('color', palette.text, 'important')
+
+  let styleEl = doc.getElementById('book-theme-inline-override') as HTMLStyleElement | null
+  if (!styleEl) {
+    styleEl = doc.createElement('style')
+    styleEl.id = 'book-theme-inline-override'
+    doc.head?.appendChild(styleEl)
+  }
+  styleEl.textContent = buildBookReaderInlineOverrideCss(mode)
+}
+
+const totalTocCount = computed(() => flattenToc(toc.value).length)
+
+const visibleToc = computed<VisibleTocNode[]>(() => {
+  const walk = (nodes: TocNode[], depth = 0): VisibleTocNode[] =>
+    nodes.flatMap((node) => {
+      const expanded = isTocExpanded(node.uid)
+      const currentNode: VisibleTocNode = {
+        ...node,
+        depth,
+        expanded,
+        hasChildren: node.subitems.length > 0,
+      }
+
+      return [
+        currentNode,
+        ...(expanded ? walk(node.subitems, depth + 1) : []),
+      ]
+    })
 
   return walk(toc.value)
 })
@@ -424,6 +780,51 @@ function setActiveHighlight(id?: string | null, type?: HighlightType | null) {
     clearActiveHighlight(false)
     syncBookAnnotations()
   }, 3200)
+}
+
+function removeInlineSentenceTranslation() {
+  inlineSentenceBlockCleanup?.()
+  inlineSentenceBlockCleanup = null
+  inlineSentenceBlockEl?.remove()
+  inlineSentenceBlockEl = null
+}
+
+function expandSentenceTranslationInline() {
+  if (quickLookupType.value !== 'sentence' || !quickLookupTranslation.value.trim()) {
+    return
+  }
+
+  const anchor = resolveInlineSentenceAnchor(quickLookupRange.value)
+  if (!anchor) {
+    toast.error('未找到原句位置，请重新选句')
+    return
+  }
+
+  removeInlineSentenceTranslation()
+
+  const block = buildInlineSentenceTranslationBlock(anchor.ownerDocument, {
+    translation: quickLookupTranslation.value,
+    parsedHtml: quickLookupParsedHtml.value,
+    structureNote: quickLookupStructureNote.value,
+  })
+  const closeButton = block.querySelector('.inline-sentence-translation__close') as HTMLButtonElement | null
+  const handleClose = (event: Event) => {
+    event.preventDefault()
+    removeInlineSentenceTranslation()
+  }
+  closeButton?.addEventListener('click', handleClose)
+  inlineSentenceBlockCleanup = () => closeButton?.removeEventListener('click', handleClose)
+
+  const next = anchor.nextElementSibling
+  if (isInlineSentenceTranslationBlock(next)) {
+    next.replaceWith(block)
+  } else {
+    anchor.insertAdjacentElement('afterend', block)
+  }
+
+  inlineSentenceBlockEl = block
+  block.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  closeQuickLookup()
 }
 
 async function loadBookAnnotations() {
@@ -463,6 +864,14 @@ async function saveWord(word: string, meaning: string, context: string) {
   return item
 }
 
+async function deleteWord(id: string) {
+  await deleteVocabularyApi(id)
+  vocabulary.value = vocabulary.value.filter((item) => item.id !== id)
+  appStore.removeVocabularyItem(id)
+  clearActiveHighlight()
+  syncBookAnnotations()
+}
+
 async function saveSentence(sentence: string, explanation: string) {
   const item = await addSentence({
     sentence,
@@ -476,6 +885,14 @@ async function saveSentence(sentence: string, explanation: string) {
   preCacheText(sentence, '+0%')
   setActiveHighlight(item.id, 'sentence')
   return item
+}
+
+async function deleteSentence(id: string) {
+  await deleteSentenceApi(id)
+  sentences.value = sentences.value.filter((item) => item.id !== id)
+  appStore.removeSentenceItem(id)
+  clearActiveHighlight()
+  syncBookAnnotations()
 }
 
 function getRenderedContents(): any[] {
@@ -506,6 +923,66 @@ function clearSelection() {
 
 function getContext() {
   return selectedContextText.value
+}
+
+function getShellScrollContainer(): HTMLElement {
+  if (!shellScrollContainer) {
+    shellScrollContainer = document.querySelector('.app-main') as HTMLElement
+  }
+  return shellScrollContainer || document.documentElement
+}
+
+function readStoredTocVisibility(): boolean {
+  try {
+    const raw = localStorage.getItem(TOC_PANEL_STORAGE_KEY)
+    if (raw == null) return true
+    return raw === '1'
+  } catch {
+    return true
+  }
+}
+
+function persistTocVisibility() {
+  try {
+    localStorage.setItem(TOC_PANEL_STORAGE_KEY, showToc.value ? '1' : '0')
+  } catch {}
+}
+
+function getTocExpandedStorageKey(bookId: string) {
+  return `shiyu:book-reader:toc-expanded:${bookId}`
+}
+
+function loadExpandedTocState(bookId: string) {
+  try {
+    const raw = localStorage.getItem(getTocExpandedStorageKey(bookId))
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, boolean> : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistExpandedTocState() {
+  if (!currentEbook.value) return
+  try {
+    localStorage.setItem(
+      getTocExpandedStorageKey(currentEbook.value.id),
+      JSON.stringify(expandedTocKeys.value),
+    )
+  } catch {}
+}
+
+function isTocExpanded(uid: string) {
+  return expandedTocKeys.value[uid] === true
+}
+
+function toggleTocNode(uid: string) {
+  expandedTocKeys.value = {
+    ...expandedTocKeys.value,
+    [uid]: !isTocExpanded(uid),
+  }
+  persistExpandedTocState()
 }
 
 function normalizeWhitespace(text: string): string {
@@ -600,20 +1077,81 @@ function setPopoverPosition(range: Range, contents: any) {
   const top = frameRect ? frameRect.top + rect.top : rect.top
   const bottom = frameRect ? frameRect.top + rect.bottom : rect.bottom
   const left = frameRect ? frameRect.left + rect.left : rect.left
+  const right = frameRect ? frameRect.left + rect.right : rect.right
+  const selectionType = detectSelectionType(range.toString())
 
-  let topPosition = top - 50
+  const sentenceGap = 6
+  const estimatedWidth = selectionType === 'sentence'
+    ? (range.toString().trim().length <= 30 ? 86 : 48)
+    : 112
+  const hasRightRoom = right + sentenceGap + estimatedWidth <= window.innerWidth - 12
+
+  let topPosition = selectionType === 'sentence' ? bottom + sentenceGap : top - 50
+  if (topPosition > window.innerHeight - 48) {
+    topPosition = selectionType === 'sentence' ? top - 42 : top - 46
+  }
   if (topPosition < 60) {
-    topPosition = bottom + 10
+    topPosition = bottom + sentenceGap
   }
 
-  const rawLeft = left + rect.width / 2
-  const clampedLeft = Math.max(32, Math.min(window.innerWidth - 32, rawLeft))
+  const rawLeft = selectionType === 'sentence'
+    ? (hasRightRoom ? right + sentenceGap : right - 4)
+    : left + rect.width / 2
+  const clampedLeft = selectionType === 'sentence'
+    ? Math.max(12, Math.min(window.innerWidth - estimatedWidth - 12, rawLeft))
+    : Math.max(56, Math.min(window.innerWidth - 16, rawLeft))
 
   popoverPosition.value = {
     top: topPosition,
     left: clampedLeft,
+    anchor: selectionType === 'sentence' ? (hasRightRoom ? 'start' : 'tail') : 'center',
     visible: true,
   }
+}
+
+function updateQuickLookupPanelPosition() {
+  if (!quickLookupVisible.value || !quickLookupRange.value) {
+    quickLookupPanelPosition.value = quickLookupAnchor.value
+    return
+  }
+
+  const rect = quickLookupRange.value.getBoundingClientRect()
+  const ownerDocument =
+    quickLookupRange.value.startContainer?.ownerDocument
+    || quickLookupRange.value.commonAncestorContainer?.ownerDocument
+  const frameElement = ownerDocument?.defaultView?.frameElement as HTMLElement | null
+  const frameRect = frameElement?.getBoundingClientRect()
+  const top = frameRect ? frameRect.top + rect.top : rect.top
+  const bottom = frameRect ? frameRect.top + rect.bottom : rect.bottom
+  const left = frameRect ? frameRect.left + rect.left : rect.left
+  const right = frameRect ? frameRect.left + rect.right : rect.right
+  const selectionType = quickLookupType.value || detectSelectionType(quickLookupRange.value.toString())
+
+  if ((rect.width === 0 && rect.height === 0) || !Number.isFinite(top) || !Number.isFinite(left)) {
+    quickLookupPanelPosition.value = quickLookupAnchor.value
+    return
+  }
+
+  let topPosition = selectionType === 'sentence' ? top : top - 50
+  if (topPosition > window.innerHeight - 48) {
+    topPosition = selectionType === 'sentence' ? top : top - 46
+  }
+  if (selectionType !== 'sentence' && topPosition < 60) {
+    topPosition = bottom + 10
+  }
+
+  const rawLeft = selectionType === 'sentence' ? right : left + rect.width / 2
+  const clampedLeft = Math.max(56, Math.min(window.innerWidth - 16, rawLeft))
+  quickLookupPanelPosition.value = {
+    top: topPosition,
+    left: clampedLeft,
+    sourceTop: top,
+    sourceBottom: bottom,
+  }
+}
+
+function scheduleQuickLookupPanelPositionUpdate() {
+  requestAnimationFrame(() => updateQuickLookupPanelPosition())
 }
 
 function handleSelected(_cfiRange: string, contents: any) {
@@ -655,15 +1193,69 @@ function attachContentInteraction(contents: any) {
   }
 
   const onPointerDown = () => {
+    handleTooltipClose()
+    clearHoveredAnnotation()
     if (popoverPosition.value.visible) {
       clearSelection()
     }
+  }
+  const onViewportChange = () => {
+    if (quickLookupVisible.value) {
+      scheduleQuickLookupPanelPositionUpdate()
+    }
+  }
+  const onPointerMove = (event: MouseEvent) => {
+    const frameElement = contents?.document?.defaultView?.frameElement as HTMLElement | null
+    const candidatePoints = [{ x: event.clientX, y: event.clientY }]
+    if (frameElement) {
+      const frameRect = frameElement.getBoundingClientRect()
+      candidatePoints.push({
+        x: frameRect.left + event.clientX,
+        y: frameRect.top + event.clientY,
+      })
+    }
+
+    const hovered = findHoveredAnnotation(candidatePoints)
+    if (!hovered) {
+      if (hoveredAnnotationKey) {
+        clearHoveredAnnotation()
+        handleTooltipLeave()
+      }
+      return
+    }
+
+    const hoveredKey = getAnnotationKey(hovered)
+    if (hoveredKey === hoveredAnnotationKey) {
+      return
+    }
+
+    clearHoveredAnnotation()
+    hoveredAnnotationKey = hoveredKey
+    setAnnotationVisualState(hovered, true)
+    const mark = resolveAnnotationMark(hovered)
+    if (mark?.element) {
+      showTooltipForAnnotation(
+        hovered.annotationId,
+        hovered.annotationType,
+        mark.element,
+        readerHostRef.value,
+      )
+    }
+  }
+  const onPointerLeave = () => {
+    if (!hoveredAnnotationKey) return
+    clearHoveredAnnotation()
+    handleTooltipLeave()
   }
 
   contents.document.addEventListener('mouseup', dismissIfCollapsed)
   contents.document.addEventListener('touchend', dismissIfCollapsed)
   contents.document.addEventListener('mousedown', onPointerDown)
   contents.document.addEventListener('touchstart', onPointerDown)
+  contents.document.addEventListener('mousemove', onPointerMove)
+  contents.document.addEventListener('mouseleave', onPointerLeave)
+  contents.window?.addEventListener?.('scroll', onViewportChange, { passive: true })
+  contents.window?.addEventListener?.('resize', onViewportChange)
 
   contentCleanupFns.push(() => {
     try {
@@ -671,6 +1263,10 @@ function attachContentInteraction(contents: any) {
       contents.document.removeEventListener('touchend', dismissIfCollapsed)
       contents.document.removeEventListener('mousedown', onPointerDown)
       contents.document.removeEventListener('touchstart', onPointerDown)
+      contents.document.removeEventListener('mousemove', onPointerMove)
+      contents.document.removeEventListener('mouseleave', onPointerLeave)
+      contents.window?.removeEventListener?.('scroll', onViewportChange)
+      contents.window?.removeEventListener?.('resize', onViewportChange)
     } catch {}
   })
 }
@@ -679,13 +1275,17 @@ function normalizeHref(href?: string): string {
   return (href || '').split('#')[0]
 }
 
-function normalizeToc(nodes: any[] = []): TocNode[] {
-  return nodes.map((node) => ({
+function normalizeToc(nodes: any[] = [], parentUid = 'root'): TocNode[] {
+  return nodes.map((node, index) => {
+    const uid = `${parentUid}/${String(node.id || node.href || node.label || `node-${index}`)}-${index}`
+    return {
+      uid,
     id: node.id,
     label: node.label || node.title || '未命名章节',
     href: node.href || '',
-    subitems: normalizeToc(node.subitems || node.children || []),
-  }))
+      subitems: normalizeToc(node.subitems || node.children || [], uid),
+    }
+  })
 }
 
 function flattenToc(nodes: TocNode[]): TocNode[] {
@@ -712,15 +1312,67 @@ function currentLocationHref() {
   return null
 }
 
+function resolveBookProgress(location: any): number | null {
+  const start = location?.start
+  if (!start) return null
+
+  if (typeof start.percentage === 'number' && Number.isFinite(start.percentage)) {
+    return Math.max(0, Math.min(1, start.percentage))
+  }
+
+  if (start.cfi && bookInstance?.locations?.length?.()) {
+    try {
+      const percentage = bookInstance.locations.percentageFromCfi(start.cfi)
+      if (typeof percentage === 'number' && Number.isFinite(percentage)) {
+        return Math.max(0, Math.min(1, percentage))
+      }
+    } catch (e) {
+      console.warn('根据 CFI 计算图书进度失败:', e)
+    }
+  }
+
+  return null
+}
+
+async function ensureBookLocationsGenerated() {
+  if (!bookInstance?.locations?.generate || locationsReady) return
+  if (locationsGenerationPromise) return locationsGenerationPromise
+
+  locationsGenerationPromise = bookInstance.locations.generate(1600)
+    .then(() => {
+      locationsReady = true
+      const location = rendition?.currentLocation?.()
+      if (location) {
+        handleRelocated(location)
+      }
+    })
+    .catch((e: any) => {
+      console.warn('生成图书进度 locations 失败:', e)
+    })
+    .finally(() => {
+      locationsGenerationPromise = null
+    })
+
+  return locationsGenerationPromise
+}
+
 function applyReaderTheme() {
   if (!rendition?.themes) return
 
-  rendition.themes.registerCss(BOOK_READER_THEME_NAME, BOOK_READER_THEME_CSS)
-  rendition.themes.select(BOOK_READER_THEME_NAME)
-  rendition.themes.override('color', '#1D1D1F', true)
-  rendition.themes.override('background', '#FFFFFF', true)
-  rendition.themes.override('font-size', '1.08rem', true)
-  rendition.themes.override('line-height', '1.9', true)
+  const mode = currentTheme.value
+  const themeName = getBookReaderThemeName(mode)
+  const palette = getBookReaderPalette(mode)
+
+  if (!registeredReaderThemes.has(themeName)) {
+    rendition.themes.registerCss(themeName, buildBookReaderThemeCss(mode))
+    registeredReaderThemes.add(themeName)
+  }
+
+  rendition.themes.select(themeName)
+  rendition.themes.override('color', palette.text, true)
+  rendition.themes.override('background', palette.bgLight, true)
+  rendition.themes.override('font-size', '1.13rem', true)
+  rendition.themes.override('line-height', '1.98', true)
   rendition.themes.font("'Georgia', 'Times New Roman', serif")
 }
 
@@ -729,7 +1381,85 @@ function syncBookUpdate(updated: EbookItem) {
   emit('updated', updated)
 }
 
+function getAnnotationKey(entry: Pick<BookAnnotationEntry, 'annotationId' | 'annotationType'>) {
+  return `${entry.annotationType}:${entry.annotationId}`
+}
+
+function applyAnnotationAttrs(element: Element | null | undefined, attrs: Record<string, string>) {
+  if (!element) return
+
+  const applyTo = (node: Element) => {
+    for (const [name, value] of Object.entries(attrs)) {
+      node.setAttribute(name, value)
+    }
+  }
+
+  applyTo(element)
+  for (const child of Array.from(element.children)) {
+    applyTo(child)
+  }
+}
+
+function resolveAnnotationMark(entry: Pick<BookAnnotationEntry, 'annotation' | 'mark'>) {
+  return entry.annotation?.mark ?? entry.mark ?? null
+}
+
+function setAnnotationVisualState(entry: BookAnnotationEntry, hovered: boolean) {
+  applyAnnotationAttrs(resolveAnnotationMark(entry)?.element, hovered ? entry.hoverAttrs : entry.idleAttrs)
+}
+
+function clearHoveredAnnotation() {
+  if (!hoveredAnnotationKey) return
+  const current = renderedAnnotations.find((entry) => getAnnotationKey(entry) === hoveredAnnotationKey)
+  if (current) {
+    setAnnotationVisualState(current, false)
+  }
+  hoveredAnnotationKey = null
+}
+
+function rectContains(rect: DOMRect, clientX: number, clientY: number) {
+  const left = rect.left
+  const top = rect.top
+  const right = left + rect.width
+  const bottom = top + rect.height
+  return clientX >= left && clientX <= right && clientY >= top && clientY <= bottom
+}
+
+function markContainsPoint(
+  mark: BookAnnotationEntry['mark'] | null | undefined,
+  points: Array<{ x: number; y: number }>,
+) {
+  if (!mark?.getBoundingClientRect || !mark?.getClientRects) return false
+
+  const bounds = mark.getBoundingClientRect()
+  if (!points.some((point) => rectContains(bounds, point.x, point.y))) {
+    return false
+  }
+
+  const rects = Array.from(mark.getClientRects?.() || [])
+  if (rects.length === 0) {
+    return true
+  }
+
+  return rects.some((rect) =>
+    points.some((point) => rectContains(rect, point.x, point.y)),
+  )
+}
+
+function findHoveredAnnotation(points: Array<{ x: number; y: number }>) {
+  for (let index = renderedAnnotations.length - 1; index >= 0; index -= 1) {
+    const entry = renderedAnnotations[index]
+    if (markContainsPoint(resolveAnnotationMark(entry), points)) {
+      return entry
+    }
+  }
+  return null
+}
+
 function clearRenderedAnnotations() {
+  clearHoveredAnnotation()
+  handleTooltipClose()
+
   if (!rendition?.annotations) {
     renderedAnnotations = []
     return
@@ -752,24 +1482,44 @@ function syncBookAnnotations() {
 
   for (const item of vocabulary.value) {
     if (!item.ebook_cfi) continue
-    const key = `highlight:${item.ebook_cfi}`
+    const key = `word-highlight:${item.ebook_cfi}`
     if (seen.has(key)) continue
     seen.add(key)
     const isFocused = activeHighlightId.value === item.id && activeHighlightType.value === 'word'
+    const isDark = currentTheme.value === 'dark'
+    const idleAttrs = {
+      fill: isDark
+        ? (isFocused ? '#F59E0B' : '#FBBF24')
+        : (isFocused ? '#f43f5e' : '#fb7185'),
+      'fill-opacity': isDark
+        ? (isFocused ? '0.34' : '0.20')
+        : (isFocused ? '0.28' : '0.16'),
+      'mix-blend-mode': 'multiply',
+    }
+    const hoverAttrs = {
+      ...idleAttrs,
+      'fill-opacity': isDark
+        ? (isFocused ? '0.42' : '0.28')
+        : (isFocused ? '0.34' : '0.24'),
+    }
     try {
-      rendition.annotations.highlight(
+      const annotation = rendition.annotations.highlight(
         item.ebook_cfi,
         { id: item.id, type: 'word' },
         undefined,
         isFocused ? 'book-word-highlight book-word-highlight--focus' : 'book-word-highlight',
-        {
-          fill: isFocused ? '#16a34a' : '#22c55e',
-          'fill-opacity': isFocused ? '0.42' : '0.22',
-          'mix-blend-mode': 'multiply',
-          'pointer-events': 'none',
-        },
+        idleAttrs,
       )
-      renderedAnnotations.push({ cfi: item.ebook_cfi, type: 'highlight' })
+      renderedAnnotations.push({
+        cfi: item.ebook_cfi,
+        type: 'highlight',
+        annotationId: item.id,
+        annotationType: 'word',
+        annotation,
+        mark: annotation?.mark ?? null,
+        idleAttrs,
+        hoverAttrs,
+      })
     } catch (e) {
       console.warn('恢复图书单词高亮失败:', e)
     }
@@ -777,24 +1527,44 @@ function syncBookAnnotations() {
 
   for (const item of sentences.value) {
     if (!item.ebook_cfi) continue
-    const key = `underline:${item.ebook_cfi}`
+    const key = `sentence-highlight:${item.ebook_cfi}`
     if (seen.has(key)) continue
     seen.add(key)
     const isFocused = activeHighlightId.value === item.id && activeHighlightType.value === 'sentence'
+    const isDark = currentTheme.value === 'dark'
+    const idleAttrs = {
+      fill: isDark
+        ? (isFocused ? '#14B8A6' : '#2DD4BF')
+        : (isFocused ? '#3b82f6' : '#60a5fa'),
+      'fill-opacity': isDark
+        ? (isFocused ? '0.30' : '0.18')
+        : (isFocused ? '0.26' : '0.16'),
+      'mix-blend-mode': 'multiply',
+    }
+    const hoverAttrs = {
+      ...idleAttrs,
+      'fill-opacity': isDark
+        ? (isFocused ? '0.38' : '0.26')
+        : (isFocused ? '0.34' : '0.24'),
+    }
     try {
-      rendition.annotations.underline(
+      const annotation = rendition.annotations.highlight(
         item.ebook_cfi,
         { id: item.id, type: 'sentence' },
         undefined,
         isFocused ? 'book-sentence-highlight book-sentence-highlight--focus' : 'book-sentence-highlight',
-        {
-          stroke: isFocused ? '#7c3aed' : '#8b5cf6',
-          'stroke-opacity': '0.92',
-          'stroke-width': isFocused ? '3.2' : '1.8',
-          'pointer-events': 'none',
-        },
+        idleAttrs,
       )
-      renderedAnnotations.push({ cfi: item.ebook_cfi, type: 'underline' })
+      renderedAnnotations.push({
+        cfi: item.ebook_cfi,
+        type: 'highlight',
+        annotationId: item.id,
+        annotationType: 'sentence',
+        annotation,
+        mark: annotation?.mark ?? null,
+        idleAttrs,
+        hoverAttrs,
+      })
     } catch (e) {
       console.warn('恢复图书句子高亮失败:', e)
     }
@@ -825,9 +1595,14 @@ function queueProgressSave(progress: number, cfiPosition?: string) {
 
 function handleRelocated(location: any) {
   const start = location?.start
-  const progress = typeof start?.percentage === 'number' ? start.percentage : 0
+  const progress = resolveBookProgress(location)
   currentChapter.value = resolveChapterLabel(start?.href)
-  queueProgressSave(progress, start?.cfi || undefined)
+  if (progress !== null) {
+    queueProgressSave(progress, start?.cfi || undefined)
+  } else if (start?.cfi && currentEbook.value?.cfi_position !== start.cfi) {
+    queueProgressSave(currentEbook.value?.progress || 0, start.cfi)
+  }
+  scheduleQuickLookupPanelPositionUpdate()
 }
 
 function cleanupReader() {
@@ -840,6 +1615,7 @@ function cleanupReader() {
   clearSelection()
   selectedCfi.value = null
   selectedHref.value = null
+  removeInlineSentenceTranslation()
   closeQuickLookup()
   if (showAnnotationForm.value) {
     handleCloseForm()
@@ -870,6 +1646,8 @@ function cleanupReader() {
     bookInstance?.destroy?.()
   } catch {}
   bookInstance = null
+  locationsReady = false
+  locationsGenerationPromise = null
 
   if (readerHostRef.value) {
     readerHostRef.value.innerHTML = ''
@@ -880,10 +1658,12 @@ async function initReader() {
   loading.value = true
   error.value = null
   toc.value = []
+  expandedTocKeys.value = {}
   currentChapter.value = ''
   cleanupReader()
 
   try {
+    await settingsStore.loadSettings()
     const latest = await getEbook(props.ebook.id).catch(() => props.ebook)
     currentEbook.value = latest
     await loadBookAnnotations()
@@ -895,29 +1675,35 @@ async function initReader() {
 
     const assetUrl = convertFileSrc(currentEbook.value.file_path)
     bookInstance = ePub(assetUrl)
+    locationsReady = Boolean(bookInstance.locations?.length?.())
+    locationsGenerationPromise = null
 
     const navigation = await bookInstance.loaded.navigation
     toc.value = normalizeToc(navigation?.toc || [])
+    expandedTocKeys.value = loadExpandedTocState(latest.id)
     currentChapter.value = toc.value[0]?.label || ''
 
     rendition = bookInstance.renderTo(readerHostRef.value, {
-      manager: 'continuous',
+      manager: 'default',
       width: '100%',
       height: '100%',
-      flow: 'scrolled-continuous',
+      flow: 'scrolled-doc',
       spread: 'none',
       allowScriptedContent: true,
     })
 
     applyReaderTheme()
     rendition.hooks.content.register((contents: any) => {
+      applyInlineThemeOverride(contents)
       attachContentInteraction(contents)
     })
     rendition.on('relocated', handleRelocated)
     rendition.on('selected', handleSelected)
     await rendition.display(props.focusCfi || currentEbook.value.cfi_position || undefined)
+    void ensureBookLocationsGenerated()
     setActiveHighlight(props.highlightId, props.highlightType)
     syncBookAnnotations()
+    scheduleQuickLookupPanelPositionUpdate()
   } catch (e: any) {
     error.value = e?.message || String(e)
     toast.error('打开图书失败: ' + error.value)
@@ -928,26 +1714,34 @@ async function initReader() {
 
 async function openChapter(item: TocNode) {
   if (!rendition || !item.href) return
+  removeInlineSentenceTranslation()
   clearSelection()
-  await rendition.display(item.href)
+  await rendition.display(item.href || normalizeHref(item.href))
   currentChapter.value = item.label
 }
 
 function prevPage() {
+  removeInlineSentenceTranslation()
   clearSelection()
   rendition?.prev?.()
 }
 
 function nextPage() {
+  removeInlineSentenceTranslation()
   clearSelection()
   rendition?.next?.()
 }
 
 onMounted(() => {
   void initReader()
+  getShellScrollContainer().addEventListener('scroll', scheduleQuickLookupPanelPositionUpdate, { passive: true })
+  window.addEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
 })
 
 onUnmounted(() => {
+  getShellScrollContainer().removeEventListener('scroll', scheduleQuickLookupPanelPositionUpdate)
+  window.removeEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
+  shellScrollContainer = null
   cleanupReader()
 })
 
@@ -986,14 +1780,60 @@ watch(
     void rendition.display(newCfi)
   },
 )
+
+watch(
+  () => [quickLookupVisible.value, quickLookupSelectedText.value] as const,
+  () => {
+    if (!quickLookupVisible.value) {
+      quickLookupPanelPosition.value = null
+      return
+    }
+    nextTick(() => scheduleQuickLookupPanelPositionUpdate())
+  },
+)
+
+watch(showToc, async () => {
+  persistTocVisibility()
+  await nextTick()
+  if (!rendition || !readerHostRef.value) return
+
+  const width = readerHostRef.value.clientWidth
+  const height = readerHostRef.value.clientHeight
+  if (width > 0 && height > 0) {
+    rendition.resize?.(width, height)
+  }
+  scheduleQuickLookupPanelPositionUpdate()
+})
+
+watch(currentTheme, () => {
+  if (!rendition) return
+  applyReaderTheme()
+  for (const contents of getRenderedContents()) {
+    applyInlineThemeOverride(contents)
+  }
+  scheduleQuickLookupPanelPositionUpdate()
+})
 </script>
 
 <template>
   <section class="book-reader">
-    <header class="reader-header">
-      <div class="reader-title-block">
+    <div class="reader-toolbar glass-card">
+      <div class="reader-actions">
         <button class="header-btn" @click="emit('close')">← 返回书架</button>
-        <div class="reader-title-wrap">
+        <button class="header-btn" @click="prevPage">上一页</button>
+        <button class="header-btn primary" @click="nextPage">下一页</button>
+      </div>
+      <div class="reader-toolbar-meta">
+        <span>{{ progressPercent }}%</span>
+      </div>
+    </div>
+
+    <div class="reader-layout" :class="{ 'reader-layout--no-toc': !showToc }">
+      <aside v-if="showToc" class="reader-toc glass-card">
+        <button class="reader-edge-toggle header-btn header-btn--toc" @click="showToc = false">
+          隐藏目录
+        </button>
+        <div class="toc-book-meta">
           <h1 class="reader-title">{{ currentEbook?.title || ebook.title }}</h1>
           <p class="reader-subtitle">
             <span v-if="currentEbook?.author">{{ currentEbook.author }}</span>
@@ -1001,33 +1841,65 @@ watch(
             <span>{{ progressPercent }}%</span>
           </p>
         </div>
-      </div>
-      <div class="reader-actions">
-        <button class="header-btn" @click="showToc = !showToc">{{ showToc ? '隐藏目录' : '显示目录' }}</button>
-        <button class="header-btn" @click="prevPage">上一页</button>
-        <button class="header-btn primary" @click="nextPage">下一页</button>
-      </div>
-    </header>
-
-    <div class="reader-layout">
-      <aside v-if="showToc" class="reader-toc glass-card">
         <div class="toc-header">
           <h3>目录</h3>
-          <span>{{ toc.length }} 项</span>
+          <div class="toc-header-actions">
+            <span>{{ totalTocCount }} 项</span>
+          </div>
         </div>
         <div v-if="toc.length === 0" class="toc-empty">该图书未提供可用目录</div>
         <div v-else class="toc-tree">
-          <button
-            v-for="node in flatToc"
-            :key="`${node.href}-${node.label}-${node.depth}`"
-            class="toc-node"
-            :style="{ paddingLeft: `${12 + node.depth * 16}px` }"
-            @click="openChapter(node)"
+          <div
+            v-for="node in visibleToc"
+            :key="node.uid"
+            class="toc-row"
+            :style="{ paddingLeft: `${node.depth * 16}px` }"
           >
-            {{ node.label }}
-          </button>
+            <div
+              class="toc-node"
+              :class="{ 'toc-node--active': currentChapter === node.label }"
+            >
+              <button
+                class="toc-node__main"
+                type="button"
+                @click="openChapter(node)"
+              >
+                <span class="toc-node__label">{{ node.label }}</span>
+              </button>
+              <button
+                v-if="node.hasChildren"
+                class="toc-node__toggle"
+                type="button"
+                :title="node.expanded ? '收起子目录' : '展开子目录'"
+                @click.stop="toggleTocNode(node.uid)"
+              >
+                <svg
+                  class="toc-node__toggle-icon"
+                  :class="{ 'toc-node__toggle-icon--expanded': node.expanded }"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M5 3.5L10.5 8L5 12.5" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
       </aside>
+
+      <div v-else class="reader-mini-meta glass-card">
+        <button class="reader-edge-toggle header-btn header-btn--toc" @click="showToc = true">
+          显示目录
+        </button>
+        <div class="reader-mini-title">{{ currentEbook?.title || ebook.title }}</div>
+        <div class="reader-mini-subtitle">
+          <span v-if="currentEbook?.author">{{ currentEbook.author }}</span>
+          <span>{{ currentChapter || '正在加载章节' }}</span>
+          <span>{{ progressPercent }}%</span>
+        </div>
+      </div>
 
       <section class="reader-stage glass-card">
         <div ref="readerHostRef" class="reader-host"></div>
@@ -1057,10 +1929,22 @@ watch(
       @cancel="handleCloseForm"
     />
 
+    <AnnotationTooltip
+      v-if="tooltipState.visible"
+      :content="tooltipState.content"
+      :type="tooltipState.type"
+      :position="tooltipState.position"
+      @close="handleTooltipClose"
+      @hover-enter="handleTooltipEnter"
+      @hover-leave="handleTooltipLeave"
+      @remove="handleTooltipRemove"
+    />
+
     <QuickLookupPanel
       :visible="quickLookupVisible"
       :type="quickLookupType"
-      :position="quickLookupAnchor"
+      :position="quickLookupPanelPosition || quickLookupAnchor"
+      :content-element="readerHostRef"
       :selected-text="quickLookupSelectedText"
       :context-text="quickLookupContextText"
       :loading="quickLookupLoading"
@@ -1070,12 +1954,15 @@ watch(
       :deep-error="quickLookupDeepError"
       :word-pos="quickLookupWordPos"
       :meaning="quickLookupMeaning"
+      :base-meaning="quickLookupBaseMeaning"
+      :other-meanings="quickLookupOtherMeanings"
       :translation="quickLookupTranslation"
       :parsed-html="quickLookupParsedHtml"
       :structure-note="quickLookupStructureNote"
       @close="closeQuickLookup"
       @retry="retryQuickLookup"
       @deepen="requestSentenceDeepAnalysis"
+      @inline="expandSentenceTranslationInline"
       @edit="openQuickLookupEditor"
       @save="saveQuickLookup"
     />
@@ -1086,42 +1973,36 @@ watch(
 .book-reader {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px 24px 28px;
+  gap: 0;
+  width: 100%;
+  padding: 8px 24px 28px;
 }
 
-.reader-header {
+.reader-toolbar {
+  position: fixed;
+  top: 52px;
+  right: 28px;
+  z-index: 60;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.reader-title-block {
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-}
-
-.reader-title-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 16px;
 }
 
 .reader-title {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.15rem;
   color: var(--c-text);
+  line-height: 1.4;
 }
 
 .reader-subtitle {
   margin: 0;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  font-size: 0.9rem;
+  font-size: 0.84rem;
   color: var(--c-text-lighter);
 }
 
@@ -1129,6 +2010,21 @@ watch(
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.reader-toolbar-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--c-overlay-bg);
+  border: 1px solid var(--c-border);
+  color: var(--c-text-lighter);
+  font-size: 0.88rem;
+  font-weight: 700;
 }
 
 .header-btn {
@@ -1153,28 +2049,95 @@ watch(
   color: #fff;
 }
 
+.header-btn--toc {
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
 .reader-layout {
+  position: relative;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   align-items: start;
-  gap: 16px;
-  min-height: calc(100vh - 180px);
+  gap: 24px;
+  width: 100%;
+  min-height: calc(100vh - 72px);
+}
+
+.reader-layout--no-toc {
+  display: block;
+}
+
+.reader-mini-meta {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 280px;
+  padding: 28px 12px 10px;
+  border-radius: 14px;
+}
+
+.reader-mini-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--c-text);
+}
+
+.reader-mini-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--c-text-lighter);
+}
+
+.reader-layout--no-toc .reader-stage {
+  width: min(100%, 920px);
+  margin: 0 auto;
 }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  background: var(--c-glass-bg);
+  border: 1px solid var(--c-glass-border);
+  box-shadow: var(--c-shadow-lg);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
 
 .reader-toc {
   align-self: start;
+  position: relative;
   border-radius: 18px;
-  padding: 16px;
+  padding: 30px 16px 16px;
   overflow: auto;
-  max-height: calc(100vh - 180px);
+  max-height: calc(100vh - 72px);
+}
+
+.reader-edge-toggle {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  z-index: 32;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--c-overlay-bg-strong);
+  border-color: var(--c-border);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.toc-book-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--c-overlay-border);
 }
 
 .toc-header {
@@ -1183,6 +2146,12 @@ watch(
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.toc-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .toc-header h3 {
@@ -1199,39 +2168,110 @@ watch(
 .toc-tree {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+}
+
+.toc-row {
+  display: block;
 }
 
 .toc-node {
-  padding: 10px 12px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
   border-radius: 10px;
   border: 1px solid var(--c-border);
   background: var(--c-bg-light);
   color: var(--c-text);
-  text-align: left;
-  cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .toc-node:hover {
-  border-color: #bfdbfe;
-  background: #eff6ff;
+  border-color: var(--c-primary);
+  background: var(--c-primary-light);
+}
+
+.toc-node--active {
+  border-color: var(--c-primary);
+  background: var(--c-primary-light);
+  color: var(--c-primary-dark);
+  font-weight: 700;
+}
+
+.toc-node__main {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 8px 10px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.toc-node__label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toc-node__toggle {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 6px 8px 6px 0;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--c-text-lighter);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.toc-node__toggle:hover {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--c-text);
+}
+
+.toc-node__toggle-icon {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.18s ease;
+}
+
+.toc-node__toggle-icon--expanded {
+  transform: rotate(90deg);
 }
 
 .reader-stage {
   position: relative;
   border-radius: 20px;
   padding: 16px;
-  min-height: calc(100vh - 180px);
+  min-height: calc(100vh - 72px);
   overflow: hidden;
+  width: 100%;
 }
 
 .reader-host {
-  width: 100%;
-  height: calc(100vh - 212px);
+  width: min(100%, 760px);
+  height: calc(100vh - 104px);
+  margin: 0 auto;
   border-radius: 14px;
   overflow: hidden;
-  background: #fff;
+  background: var(--c-bg-light);
+  box-shadow: inset 0 0 0 1px var(--c-border-light);
 }
 
 .stage-state {
@@ -1243,7 +2283,7 @@ watch(
   color: var(--c-text-lighter);
   font-size: 0.95rem;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--c-overlay-bg);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
@@ -1252,13 +2292,54 @@ watch(
   color: #dc2626;
 }
 
+@media (min-width: 1260px) {
+  .reader-layout {
+    display: block;
+  }
+
+  .reader-toc {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 280px;
+  }
+
+  .reader-stage,
+  .reader-layout--no-toc .reader-stage {
+    width: min(100%, 920px);
+    margin: 0 auto;
+  }
+}
+
 @media (max-width: 960px) {
+  .book-reader {
+    padding-top: 58px;
+  }
+
+  .reader-toolbar {
+    top: 44px;
+    right: 16px;
+    left: 16px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
   .reader-layout {
     grid-template-columns: 1fr;
   }
 
+  .reader-mini-meta {
+    left: 8px;
+    right: 8px;
+    max-width: none;
+  }
+
   .reader-toc {
     max-height: 240px;
+  }
+
+  .reader-toolbar-meta {
+    min-width: 0;
   }
 }
 </style>

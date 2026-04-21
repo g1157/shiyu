@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import GlobalToast from './components/GlobalToast.vue'
 import VersionAnnouncement from './components/VersionAnnouncement.vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useRoute } from 'vue-router'
+import { useSettingsStore } from './stores/settingsStore'
 
 const appWindow = getCurrentWindow()
 function minimize() { appWindow.minimize() }
@@ -12,11 +13,48 @@ function toggleMaximize() { appWindow.toggleMaximize() }
 function close() { appWindow.close() }
 
 const route = useRoute()
+const settingsStore = useSettingsStore()
 const mascotRoutes = ['/', '/translate', '/epub-import', '/ocr-import', '/data', '/settings']
 const showMascot = computed(() => mascotRoutes.includes(route.path))
+const currentTheme = computed(() => (settingsStore.theme === 'dark' ? 'dark' : 'light'))
+const themeToggleTitle = computed(() => currentTheme.value === 'dark' ? '切换到浅色模式' : '切换到深色模式')
+
+void settingsStore.loadSettings()
+
+function preventContextMenu(event: Event) {
+  event.preventDefault()
+}
+
+function applyTheme(theme: string) {
+  const isDark = theme === 'dark'
+  document.documentElement.classList.toggle('dark', isDark)
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
+  document.documentElement.style.colorScheme = isDark ? 'dark' : 'light'
+}
+
+async function toggleTheme() {
+  const previous = currentTheme.value
+  const next = previous === 'dark' ? 'light' : 'dark'
+
+  applyTheme(next)
+  try {
+    await settingsStore.setSetting('theme', next)
+  } catch (error) {
+    console.error('Failed to toggle theme:', error)
+    applyTheme(previous)
+  }
+}
+
+watch(currentTheme, (theme) => {
+  applyTheme(theme)
+}, { immediate: true })
 
 onMounted(() => {
-  document.addEventListener('contextmenu', (e) => e.preventDefault())
+  document.addEventListener('contextmenu', preventContextMenu)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('contextmenu', preventContextMenu)
 })
 </script>
 
@@ -27,6 +65,22 @@ onMounted(() => {
       <div class="custom-titlebar" data-tauri-drag-region>
         <div class="titlebar-spacer" data-tauri-drag-region></div>
         <div class="titlebar-controls">
+          <button class="tb-btn tb-btn--theme" @click="toggleTheme" :title="themeToggleTitle">
+            <svg v-if="currentTheme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="4.5" />
+              <path d="M12 2.5v2.5" />
+              <path d="M12 19v2.5" />
+              <path d="M4.93 4.93l1.77 1.77" />
+              <path d="M17.3 17.3l1.77 1.77" />
+              <path d="M2.5 12H5" />
+              <path d="M19 12h2.5" />
+              <path d="M4.93 19.07l1.77-1.77" />
+              <path d="M17.3 6.7l1.77-1.77" />
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+            </svg>
+          </button>
           <button class="tb-btn" @click="minimize" title="最小化">
             <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
           </button>
@@ -88,6 +142,37 @@ onMounted(() => {
   --font-sans: 'Inter', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif;
   --font-serif: 'Georgia', 'Times New Roman', serif;
   --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  --c-scrollbar-thumb: rgba(15, 23, 42, 0.12);
+  --c-scrollbar-thumb-hover: rgba(15, 23, 42, 0.22);
+  --c-overlay-bg: rgba(255, 255, 255, 0.92);
+  --c-overlay-bg-strong: rgba(255, 255, 255, 0.985);
+  --c-overlay-border: rgba(226, 232, 240, 0.88);
+  --c-glass-bg: rgba(255, 255, 255, 0.86);
+  --c-glass-border: rgba(255, 255, 255, 0.72);
+  --c-shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+:root.dark {
+  --c-text: #D4DCE6;
+  --c-text-lighter: #93A0B0;
+  --c-bg: #0D1117;
+  --c-bg-light: #151B23;
+  --c-bg-lighter: #1B2430;
+  --c-border: #2A3544;
+  --c-border-light: #202938;
+  --c-primary: #4DA3FF;
+  --c-primary-dark: #7BBCFF;
+  --c-primary-light: rgba(77, 163, 255, 0.16);
+  --c-accent: #4DA3FF;
+  --c-danger: #FF6B6B;
+  --c-scrollbar-thumb: rgba(148, 163, 184, 0.26);
+  --c-scrollbar-thumb-hover: rgba(148, 163, 184, 0.42);
+  --c-overlay-bg: rgba(21, 27, 35, 0.92);
+  --c-overlay-bg-strong: rgba(21, 27, 35, 0.985);
+  --c-overlay-border: rgba(71, 85, 105, 0.62);
+  --c-glass-bg: rgba(21, 27, 35, 0.8);
+  --c-glass-border: rgba(71, 85, 105, 0.34);
+  --c-shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -127,6 +212,7 @@ body {
   background: var(--c-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.22s ease, color 0.22s ease;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -148,8 +234,8 @@ a { color: inherit; text-decoration: none; }
   height: 36px;
   display: flex;
   align-items: center;
-  background: #e6e6e6;
-  border-bottom: none;
+  background: var(--c-bg-lighter);
+  border-bottom: 1px solid var(--c-border-light);
   -webkit-app-region: drag;
   flex-shrink: 0;
 }
@@ -171,19 +257,23 @@ a { color: inherit; text-decoration: none; }
   justify-content: center;
   border: none;
   background: transparent;
-  color: #aaa;
+  color: var(--c-text-lighter);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .tb-btn:hover {
-  background: var(--c-bg-lighter);
-  color: #666;
+  background: var(--c-bg-light);
+  color: var(--c-text);
 }
 
 .tb-btn--close:hover {
   background: #ef4444;
   color: #fff;
+}
+
+.tb-btn--theme {
+  margin-right: 4px;
 }
 
 /* ── 主内容区 ── */
@@ -196,16 +286,18 @@ a { color: inherit; text-decoration: none; }
 .app-main::-webkit-scrollbar { width: 5px; }
 .app-main::-webkit-scrollbar-track { background: transparent; }
 .app-main::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--c-scrollbar-thumb);
   border-radius: 3px;
 }
 .app-main::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.16);
+  background: var(--c-scrollbar-thumb-hover);
 }
 
 .page-container {
-  max-width: 100%;
-  padding: 28px 36px;
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 32px;
 }
 .page-title {
   display: flex;

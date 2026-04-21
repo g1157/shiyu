@@ -237,7 +237,7 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: stretch;
   padding: 12px 6px 16px;
-  background: #e6e6e6;
+  background: var(--c-bg-lighter);
   border-right: none;
   position: relative;
   z-index: 50;
@@ -384,7 +384,7 @@ onUnmounted(() => {
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
-  color: #aaa;
+  color: var(--c-text-lighter);
   transition: color 0.2s ease;
   flex-shrink: 0;
 }
@@ -396,7 +396,7 @@ onUnmounted(() => {
   transform: translateX(-4px);
   overflow: hidden;
   white-space: nowrap;
-  color: #555;
+  color: var(--c-text-lighter);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.1px;
@@ -408,7 +408,7 @@ onUnmounted(() => {
 }
 
 .sidebar-btn:hover svg {
-  color: #666;
+  color: var(--c-text);
 }
 
 .sidebar-btn.active {
@@ -463,15 +463,15 @@ onUnmounted(() => {
   transform: translateY(-50%) scale(0.92);
   padding: 5px 12px;
   border-radius: 6px;
-  background: #333;
-  color: #fff;
+  background: var(--c-overlay-bg-strong);
+  color: var(--c-text);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.18s ease, transform 0.18s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   z-index: 100;
 }
 

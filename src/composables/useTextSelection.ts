@@ -13,6 +13,7 @@ export interface PopoverPosition {
     top: number
     left: number
     visible: boolean
+    anchor?: 'center' | 'tail' | 'start'
 }
 
 /**
@@ -30,7 +31,8 @@ export function useTextSelection(containerRef: Ref<HTMLElement | null>) {
     const popoverPosition = ref<PopoverPosition>({
         top: 0,
         left: 0,
-        visible: false
+        visible: false,
+        anchor: 'center'
     })
 
     let isInternalClear = false
@@ -151,24 +153,53 @@ export function useTextSelection(containerRef: Ref<HTMLElement | null>) {
                 }
             }
 
+            const selectionType = detectSelectionType(text)
             selection.value = {
                 text,
-                type: detectSelectionType(text),
+                type: selectionType,
                 range,
                 rect
             }
 
-            // 计算弹出框位置（使用视口相对坐标，popover 使用 fixed 定位）
+            // 句子按钮优先吸附在选区末尾，方便点击；单词仍放在中上方。
             const minTop = 60
-            let topPosition = rect.top - 50
+            const maxTop = window.innerHeight - 48
+            const estimatedWidth = selectionType === 'sentence'
+                ? (text.length <= 30 ? 86 : 48)
+                : 112
+            const sentenceGap = 6
+            const hasRightRoom = rect.right + sentenceGap + estimatedWidth <= window.innerWidth - 12
+            const anchor = selectionType === 'sentence'
+                ? (hasRightRoom ? 'start' : 'tail')
+                : 'center'
+            const rawLeft = selectionType === 'sentence'
+                ? (hasRightRoom ? rect.right + sentenceGap : rect.right - 4)
+                : rect.left + rect.width / 2
+            const clampedLeft = selectionType === 'sentence'
+                ? Math.max(
+                    12,
+                    Math.min(window.innerWidth - estimatedWidth - 12, rawLeft)
+                )
+                : Math.max(
+                    56,
+                    Math.min(window.innerWidth - 16, rawLeft)
+                )
+
+            let topPosition = selectionType === 'sentence'
+                ? rect.bottom + 6
+                : rect.top - 50
+            if (topPosition > maxTop) {
+                topPosition = selectionType === 'sentence' ? rect.top - 42 : rect.top - 46
+            }
             if (topPosition < minTop) {
-                topPosition = rect.bottom + 10
+                topPosition = rect.bottom + 6
             }
 
             popoverPosition.value = {
                 top: topPosition,
-                left: rect.left + rect.width / 2,
-                visible: true
+                left: clampedLeft,
+                visible: true,
+                anchor
             }
         }, 10)
     }
@@ -186,6 +217,7 @@ export function useTextSelection(containerRef: Ref<HTMLElement | null>) {
             rect: null
         }
         popoverPosition.value.visible = false
+        popoverPosition.value.anchor = 'center'
         setTimeout(() => {
             isInternalClear = false
         }, 100)

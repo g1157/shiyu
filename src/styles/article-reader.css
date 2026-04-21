@@ -82,7 +82,7 @@
 
 /* 阅读器主容器 */
 .reader-view {
-  max-width: 720px;
+  max-width: 1040px;
   margin: 0 auto;
   padding: 2rem 1.5rem 4rem;
   min-height: 100vh;
@@ -90,9 +90,15 @@
 
 /* 阅读器头部 */
 .reader-header {
-  margin-bottom: 2.5rem;
+  width: min(100%, 680px);
+  margin: 0 auto 2.5rem;
   display: flex;
   flex-direction: column;
+}
+
+.reader-body {
+  width: min(100%, 680px);
+  margin: 0 auto;
 }
 
 .reader-actions-left {

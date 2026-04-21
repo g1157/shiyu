@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // 设置页
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { getSetting, setSetting, testApiConnection } from '../services/api'
 import { APP_VERSION } from '../constants/app'
 import VersionAnnouncement from '../components/VersionAnnouncement.vue'
+import { useSettingsStore } from '../stores/settingsStore'
 
 const apiKey = ref('')
 const apiUrl = ref('https://api.deepseek.com/v1/chat/completions')
 const apiModel = ref('deepseek-chat')
 const quickSentenceProvider = ref<'llm' | 'google' | 'deeplx'>('llm')
 const quickSentenceDeepLxUrl = ref('http://127.0.0.1:1188/translate')
+const themeMode = ref<'light' | 'dark'>('light')
 const saving = ref(false)
 const testing = ref(false)
 const message = ref('')
@@ -17,6 +19,8 @@ const messageType = ref<'success' | 'error'>('success')
 
 const ocrApiUrl = ref('')
 const ocrApiToken = ref('')
+const settingsStore = useSettingsStore()
+let themeSettingLoaded = false
 
 // ── 弹框 ──
 const showAiModal = ref(false)
@@ -25,14 +29,18 @@ const showAbout = ref(false)
 
 onMounted(async () => {
   try {
+    await settingsStore.loadSettings()
     const key = await getSetting('api_key')
     const url = await getSetting('api_url')
     const model = await getSetting('api_model')
+    const theme = settingsStore.theme
     const quickProvider = await getSetting('quick_sentence_provider')
     const deepLxUrl = await getSetting('quick_sentence_deeplx_url')
     if (key) apiKey.value = key
     if (url) apiUrl.value = url
     if (model) apiModel.value = model
+    themeMode.value = theme === 'dark' ? 'dark' : 'light'
+    themeSettingLoaded = true
     if (quickProvider === 'llm' || quickProvider === 'google' || quickProvider === 'deeplx') {
       quickSentenceProvider.value = quickProvider
     }
@@ -49,6 +57,16 @@ onMounted(async () => {
   // 帮助卡片轮播
   startCarousel()
 })
+
+watch(
+  () => settingsStore.theme,
+  (theme) => {
+    const normalized = theme === 'dark' ? 'dark' : 'light'
+    if (themeMode.value !== normalized) {
+      themeMode.value = normalized
+    }
+  },
+)
 
 onUnmounted(() => {
   if (tipTimer) clearInterval(tipTimer)
@@ -80,6 +98,18 @@ function pauseCarousel() {
 
 function resumeCarousel() {
   if (!tipTimer) startCarousel()
+}
+
+async function handleThemeChange() {
+  if (!themeSettingLoaded) return
+  const normalized = themeMode.value === 'dark' ? 'dark' : 'light'
+  if (settingsStore.theme === normalized) return
+  try {
+    await settingsStore.setSetting('theme', normalized)
+  } catch (e) {
+    console.error('Failed to save theme setting:', e)
+    themeMode.value = settingsStore.theme === 'dark' ? 'dark' : 'light'
+  }
 }
 
 // ── 拖拽切换 ──
@@ -156,6 +186,20 @@ async function handleTest() {
         <div class="setting-content row-inline">
           <span class="setting-value">{{ apiModel || '未配置' }}</span>
           <svg class="row-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="9 6 15 12 9 18"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 外观 分组 ═══ -->
+    <h3 class="group-title">外观</h3>
+    <div class="settings-group">
+      <div class="setting-row">
+        <label class="setting-label">主题</label>
+        <div class="setting-content row-inline">
+          <select v-model="themeMode" class="setting-select" @change="handleThemeChange">
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
         </div>
       </div>
     </div>
@@ -504,6 +548,34 @@ async function handleTest() {
 .modal-field .setting-hint {
   margin-top: 4px;
 }
+
+.setting-select {
+  min-width: 110px;
+  height: 32px;
+  padding: 0 34px 0 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background-color: var(--c-bg-light);
+  color: var(--c-text);
+  font-size: var(--fs-base);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--c-text-lighter) 50%),
+    linear-gradient(135deg, var(--c-text-lighter) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 12px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+
+.setting-select:focus {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px var(--c-primary-light);
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

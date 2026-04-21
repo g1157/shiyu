@@ -1,9 +1,10 @@
 import { ref, watch, nextTick, type Ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import {
-    getVocabulary,
     addVocabulary,
-    getSentences,
+    deleteVocabulary as deleteVocabularyApi,
     addSentence,
+    deleteSentence as deleteSentenceApi,
     type VocabularyItem,
     type SentenceItem,
 } from '../services/api'
@@ -26,8 +27,8 @@ export function useAnnotation(
     articleId: Ref<string | null>,
     sourceResolver?: () => AnnotationSourcePayload
 ) {
-    const vocabulary = ref<VocabularyItem[]>([])
-    const sentences = ref<SentenceItem[]>([])
+    const appStore = useAppStore()
+    const { vocabulary, sentences } = storeToRefs(appStore)
     const annotationEnabled = ref(true)
     const loading = ref(false)
 
@@ -36,12 +37,10 @@ export function useAnnotation(
     async function loadData() {
         loading.value = true
         try {
-            const [words, sents] = await Promise.all([
-                getVocabulary(),
-                getSentences(),
+            await Promise.all([
+                appStore.fetchVocabulary(true),
+                appStore.fetchSentences(true),
             ])
-            vocabulary.value = words
-            sentences.value = sents
         } catch (e) {
             console.error('加载标注数据失败:', e)
         } finally {
@@ -61,9 +60,7 @@ export function useAnnotation(
             context: context || undefined,
             ...resolvedSource,
         })
-        vocabulary.value.unshift(item)
-        // 同步到全局 appStore，让生词本页面能看到
-        useAppStore().addVocabularyItem(item)
+        appStore.addVocabularyItem(item)
         await nextTick()
         await nextTick()
         // 使用 setTimeout 确保 DOM 完全更新
@@ -84,9 +81,7 @@ export function useAnnotation(
             explanation,
             ...resolvedSource,
         })
-        sentences.value.unshift(item)
-        // 同步到全局 appStore，让句库页面能看到
-        useAppStore().addSentenceItem(item)
+        appStore.addSentenceItem(item)
         await nextTick()
         await nextTick()
         // 使用 setTimeout 确保 DOM 完全更新
@@ -96,6 +91,26 @@ export function useAnnotation(
         // 后台预缓存 TTS 音频（句子用默认语速）
         preCacheText(sentence, '+0%')
         return item
+    }
+
+    async function deleteWord(id: string) {
+        await deleteVocabularyApi(id)
+        appStore.removeVocabularyItem(id)
+        await nextTick()
+        await nextTick()
+        setTimeout(() => {
+            highlightAnnotatedContent()
+        }, 50)
+    }
+
+    async function deleteSentence(id: string) {
+        await deleteSentenceApi(id)
+        appStore.removeSentenceItem(id)
+        await nextTick()
+        await nextTick()
+        setTimeout(() => {
+            highlightAnnotatedContent()
+        }, 50)
     }
 
     // ── DOM 高亮渲染 ──────────────────────────────────────
@@ -359,6 +374,8 @@ export function useAnnotation(
         loadData,
         saveWord,
         saveSentence,
+        deleteWord,
+        deleteSentence,
         highlightAnnotatedContent,
         clearExistingAnnotations,
         findWordById,
