@@ -13,23 +13,27 @@ impl FromRow for VocabularyItem {
             meaning: row.get(2)?,
             context: row.get(3)?,
             article_path: row.get(4)?,
-            review_count: row.get(5)?,
-            last_reviewed_at: row.get(6)?,
-            created_at: row.get(7)?,
-            srs_due: row.get(8)?,
-            srs_stability: row.get(9)?,
-            srs_difficulty: row.get(10)?,
-            srs_state: row.get(11)?,
-            srs_lapses: row.get(12)?,
-            srs_reps: row.get(13)?,
-            srs_last_review: row.get(14)?,
+            ebook_id: row.get(5)?,
+            ebook_cfi: row.get(6)?,
+            ebook_href: row.get(7)?,
+            review_count: row.get(8)?,
+            last_reviewed_at: row.get(9)?,
+            created_at: row.get(10)?,
+            srs_due: row.get(11)?,
+            srs_stability: row.get(12)?,
+            srs_difficulty: row.get(13)?,
+            srs_state: row.get(14)?,
+            srs_lapses: row.get(15)?,
+            srs_reps: row.get(16)?,
+            srs_last_review: row.get(17)?,
         })
     }
 }
 
 const VOCAB_SELECT: &str =
-    "SELECT id, word, meaning, context, article_path, review_count, last_reviewed_at, created_at,
-            srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review
+    "SELECT id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href,
+            review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty,
+            srs_state, srs_lapses, srs_reps, srs_last_review
      FROM vocabulary";
 
 /// 生词Repository
@@ -53,8 +57,15 @@ impl VocabularyRepository {
     }
 
     /// 根据文章ID查找关联生词
-    pub fn find_by_article(&self, conn: &MutexGuard<Connection>, article_path: &str) -> Result<Vec<VocabularyItem>> {
-        let sql = format!("{} WHERE article_path = ?1 ORDER BY created_at DESC", VOCAB_SELECT);
+    pub fn find_by_article(
+        &self,
+        conn: &MutexGuard<Connection>,
+        article_path: &str,
+    ) -> Result<Vec<VocabularyItem>> {
+        let sql = format!(
+            "{} WHERE article_path = ?1 ORDER BY created_at DESC",
+            VOCAB_SELECT
+        );
         let mut stmt = conn.prepare(&sql)?;
 
         let items = stmt
@@ -64,8 +75,30 @@ impl VocabularyRepository {
         Ok(items)
     }
 
+    pub fn find_by_ebook(
+        &self,
+        conn: &MutexGuard<Connection>,
+        ebook_id: &str,
+    ) -> Result<Vec<VocabularyItem>> {
+        let sql = format!(
+            "{} WHERE ebook_id = ?1 ORDER BY created_at DESC",
+            VOCAB_SELECT
+        );
+        let mut stmt = conn.prepare(&sql)?;
+
+        let items = stmt
+            .query_map([ebook_id], |row| VocabularyItem::from_row(row))?
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(items)
+    }
+
     /// 获取到期待复习的生词
-    pub fn find_due(&self, conn: &MutexGuard<Connection>, now_ms: i64) -> Result<Vec<VocabularyItem>> {
+    pub fn find_due(
+        &self,
+        conn: &MutexGuard<Connection>,
+        now_ms: i64,
+    ) -> Result<Vec<VocabularyItem>> {
         let sql = format!(
             "{} WHERE (srs_due IS NULL OR srs_due <= ?1) AND srs_state != -1 ORDER BY srs_due ASC",
             VOCAB_SELECT
@@ -80,14 +113,29 @@ impl VocabularyRepository {
     }
 
     /// 添加生词
-    pub fn create(&self, conn: &MutexGuard<Connection>, req: AddVocabularyRequest) -> Result<VocabularyItem> {
+    pub fn create(
+        &self,
+        conn: &MutexGuard<Connection>,
+        req: AddVocabularyRequest,
+    ) -> Result<VocabularyItem> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
 
         conn.execute(
-            "INSERT INTO vocabulary (id, word, meaning, context, article_path, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![id, req.word, req.meaning, req.context, req.article_path, now],
+            "INSERT INTO vocabulary (
+                id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                id,
+                req.word,
+                req.meaning,
+                req.context,
+                req.article_path,
+                req.ebook_id,
+                req.ebook_cfi,
+                req.ebook_href,
+                now
+            ],
         )?;
 
         Ok(VocabularyItem {
@@ -96,6 +144,9 @@ impl VocabularyRepository {
             meaning: req.meaning,
             context: req.context,
             article_path: req.article_path,
+            ebook_id: req.ebook_id,
+            ebook_cfi: req.ebook_cfi,
+            ebook_href: req.ebook_href,
             review_count: 0,
             last_reviewed_at: None,
             created_at: now,
@@ -124,7 +175,11 @@ impl VocabularyRepository {
     }
 
     /// 更新 SRS 状态（FSRS 算法计算后的结果）
-    pub fn update_srs(&self, conn: &MutexGuard<Connection>, req: &UpdateSrsRequest) -> Result<usize> {
+    pub fn update_srs(
+        &self,
+        conn: &MutexGuard<Connection>,
+        req: &UpdateSrsRequest,
+    ) -> Result<usize> {
         let now = Utc::now().timestamp_millis();
         conn.execute(
             "UPDATE vocabulary SET
@@ -153,10 +208,14 @@ impl VocabularyRepository {
     }
 
     /// 根据文章路径删除所有关联生词
-    pub fn delete_by_article(&self, conn: &MutexGuard<Connection>, article_path: &str) -> Result<usize> {
+    pub fn delete_by_article(
+        &self,
+        conn: &MutexGuard<Connection>,
+        article_path: &str,
+    ) -> Result<usize> {
         conn.execute(
             "DELETE FROM vocabulary WHERE article_path = ?1",
-            [article_path]
+            [article_path],
         )
     }
 
@@ -166,7 +225,8 @@ impl VocabularyRepository {
         let all = self.find_all(conn)?;
 
         // 按 word（小写）分组
-        let mut groups: std::collections::HashMap<String, Vec<VocabularyItem>> = std::collections::HashMap::new();
+        let mut groups: std::collections::HashMap<String, Vec<VocabularyItem>> =
+            std::collections::HashMap::new();
         for item in all {
             let key = item.word.to_lowercase();
             groups.entry(key).or_default().push(item);

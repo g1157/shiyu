@@ -802,6 +802,16 @@
   text-decoration: underline;
 }
 
+.entry-article-link--disabled {
+  color: var(--c-text-lighter);
+  cursor: default;
+}
+
+.entry-article-link--disabled:hover {
+  color: var(--c-text-lighter);
+  text-decoration: none;
+}
+
 .entry-article-link svg {
   flex-shrink: 0;
 }

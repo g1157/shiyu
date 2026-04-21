@@ -2,7 +2,8 @@
 import { ref, computed } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { marked } from 'marked'
-import { parseEpubToc, extractEpubChapter, addArticle, type TocEntry, type ChapterResult } from '../services/api'
+import { useRouter } from 'vue-router'
+import { parseEpubToc, extractEpubChapters, addArticle, importEpubAsBook, type TocEntry, type ChapterResult } from '../services/api'
 import { useGlobalToast } from '../composables/useGlobalToast'
 import { useAppStore } from '../stores/appStore'
 import { resolveLocalImages, resolveLocalImagesInMarkdown } from '../utils/imageResolver'
@@ -12,6 +13,15 @@ marked.setOptions({ gfm: true, breaks: true })
 
 const toast = useGlobalToast()
 const appStore = useAppStore()
+const router = useRouter()
+
+type TocEntryWithMeta = TocEntry & {
+  breadcrumbs: string[]
+}
+
+type ExtractedChapter = ChapterResult & {
+  toc: TocEntryWithMeta
+}
 
 /** Render markdown with local image path resolution */
 function renderMarkdown(md: string): string {
@@ -30,12 +40,14 @@ const toc = ref<TocEntry[]>([])
 const selectedPaths = ref<Set<string>>(new Set())
 const loading = ref(false)
 const extracting = ref(false)
-const results = ref<ChapterResult[]>([])
+const results = ref<ExtractedChapter[]>([])
 const savedCount = ref(0)
 const previewIndex = ref(-1)
+const importingBook = ref(false)
 
 const hasSelection = computed(() => selectedPaths.value.size > 0)
 const selectionCount = computed(() => selectedPaths.value.size)
+const bookTitle = computed(() => fileName.value.replace(/\.epub$/i, ''))
 
 // Flatten TOC for counting
 function flattenToc(entries: TocEntry[]): TocEntry[] {
@@ -48,6 +60,39 @@ function flattenToc(entries: TocEntry[]): TocEntry[] {
 }
 
 const flatToc = computed(() => flattenToc(toc.value))
+
+function flattenTocWithMeta(entries: TocEntry[], ancestors: string[] = []): TocEntryWithMeta[] {
+  const flat: TocEntryWithMeta[] = []
+  for (const entry of entries) {
+    const breadcrumbs = [...ancestors, entry.label]
+    flat.push({ ...entry, breadcrumbs })
+    if (entry.children?.length) {
+      flat.push(...flattenTocWithMeta(entry.children, breadcrumbs))
+    }
+  }
+  return flat
+}
+
+const flatTocWithMeta = computed(() => flattenTocWithMeta(toc.value))
+const selectedEntries = computed(() =>
+  flatTocWithMeta.value
+    .filter((entry) => selectedPaths.value.has(entry.path))
+    .sort((a, b) => a.index - b.index)
+)
+
+const isPartialSelection = computed(() => {
+  const total = flatToc.value.length
+  return total > 0 && selectionCount.value < total
+})
+
+const combinedArticleTitle = computed(() =>
+  isPartialSelection.value ? `${bookTitle.value}（节选）` : bookTitle.value
+)
+
+const combinedDescription = computed(() => {
+  const scope = isPartialSelection.value ? '节选合集' : '完整合集'
+  return `EPUB ${scope} · ${results.value.length} 个章节 · 保留原目录层级`
+})
 
 async function selectFile() {
   try {
@@ -125,7 +170,8 @@ function deselectAll() {
 }
 
 async function extractSelected() {
-  const paths = Array.from(selectedPaths.value)
+  const entries = selectedEntries.value
+  const paths = entries.map((entry) => entry.path)
   if (paths.length === 0) return
 
   extracting.value = true
@@ -133,11 +179,16 @@ async function extractSelected() {
   extractProgress.value = 0
 
   try {
-    for (const path of paths) {
-      const result = await extractEpubChapter(filePath.value, path)
-      results.value.push(result)
-      extractProgress.value++
-    }
+    const extracted = await extractEpubChapters(filePath.value, paths)
+    results.value = extracted.map((result, idx) => ({
+      ...result,
+      markdown: stripLeadingDuplicateHeading(
+        result.markdown,
+        entries[idx] ? [entries[idx].label, result.title] : [result.title]
+      ),
+      toc: entries[idx],
+    }))
+    extractProgress.value = extracted.length
     step.value = 3
   } catch (e: any) {
     toast.error('提取章节失败: ' + e)
@@ -146,21 +197,113 @@ async function extractSelected() {
   }
 }
 
+async function importCurrentFileAsBook() {
+  if (!filePath.value || importingBook.value) return
+
+  importingBook.value = true
+  try {
+    const saved = await importEpubAsBook(filePath.value)
+    toast.success(`《${saved.title}》已导入书架`)
+    await router.push({ path: '/books', query: { bookId: saved.id } })
+  } catch (e: any) {
+    toast.error('导入图书失败: ' + e)
+  } finally {
+    importingBook.value = false
+  }
+}
+
 function toggleRaw(idx: number) {
   showRaw.value = { ...showRaw.value, [idx]: !showRaw.value[idx] }
 }
 
-async function saveToArticles(result: ChapterResult, index: number) {
+function normalizeText(value: string): string {
+  return value
+    .replace(/^#+\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function stripLeadingDuplicateHeading(markdown: string, candidates: string[]): string {
+  const lines = markdown.split('\n')
+  const normalizedCandidates = candidates
+    .map((candidate) => normalizeText(candidate || ''))
+    .filter(Boolean)
+
+  let firstContentIdx = 0
+  while (firstContentIdx < lines.length && !lines[firstContentIdx].trim()) {
+    firstContentIdx++
+  }
+
+  const firstLine = lines[firstContentIdx]?.trim()
+  const headingMatch = firstLine?.match(/^#{1,6}\s+(.+)$/)
+  if (!headingMatch) {
+    return markdown.trim()
+  }
+
+  if (!normalizedCandidates.includes(normalizeText(headingMatch[1]))) {
+    return markdown.trim()
+  }
+
+  lines.splice(firstContentIdx, 1)
+  if (firstContentIdx < lines.length && !lines[firstContentIdx].trim()) {
+    lines.splice(firstContentIdx, 1)
+  }
+
+  return lines.join('\n').trim()
+}
+
+function buildChapterHeading(level: number, title: string): string {
+  const depth = Math.min(Math.max(level + 2, 2), 6)
+  return `${'#'.repeat(depth)} ${title}`
+}
+
+function buildCombinedMarkdown(): string {
+  const lines: string[] = []
+  lines.push(`# ${combinedArticleTitle.value}`)
+  lines.push('')
+  lines.push(`> 来源：${bookTitle.value}.epub`)
+  lines.push(`> 章节数：${results.value.length}`)
+  lines.push(`> 导入方式：保留目录层级的 EPUB 合集`)
+  lines.push('')
+
+  if (results.value.length > 1) {
+    lines.push('## 导入目录')
+    lines.push('')
+    for (const chapter of results.value) {
+      const indent = '  '.repeat(Math.max(chapter.toc.level, 0))
+      lines.push(`${indent}- ${chapter.toc.label}`)
+    }
+    lines.push('')
+  }
+
+  for (const chapter of results.value) {
+    lines.push(buildChapterHeading(chapter.toc.level, chapter.toc.label || chapter.title))
+    lines.push('')
+    if (chapter.markdown.trim()) {
+      lines.push(chapter.markdown.trim())
+      lines.push('')
+    }
+  }
+
+  return lines.join('\n').trim()
+}
+
+function buildChapterDescription(result: ExtractedChapter): string {
+  return `EPUB 章节导入 · ${bookTitle.value} / ${result.toc.breadcrumbs.join(' / ')}`
+}
+
+async function saveToArticles(result: ExtractedChapter, index: number) {
   try {
-    // Save Markdown content (images now stored as local file paths)
     const saved = await addArticle({
-      title: result.title || `第 ${index + 1} 章`,
+      title: result.toc.label || result.title || `第 ${index + 1} 章`,
       content: result.markdown,
-      category: fileName.value.replace(/\.epub$/i, ''),
+      category: bookTitle.value,
+      description: buildChapterDescription(result),
     })
-    appStore.addArticle(saved)  // sync appStore cache
+    appStore.addArticle(saved)
     savedCount.value++
-    toast.success(`"${result.title}" 已保存到文章库`)
+    toast.success(`"${saved.title}" 已保存到文章库`)
   } catch (e: any) {
     toast.error('保存失败: ' + e)
   }
@@ -173,9 +316,10 @@ async function saveAllToArticles() {
     for (const r of results.value) {
       if (r.markdown) {
         const saved = await addArticle({
-          title: r.title || `章节 ${count + 1}`,
+          title: r.toc.label || r.title || `章节 ${count + 1}`,
           content: r.markdown,
-          category: fileName.value.replace(/\.epub$/i, ''),
+          category: bookTitle.value,
+          description: buildChapterDescription(r),
         })
         appStore.addArticle(saved)
         count++
@@ -185,6 +329,27 @@ async function saveAllToArticles() {
     toast.success(`已保存 ${count} 篇文章到文章库`)
   } catch (e: any) {
     toast.error('批量保存失败: ' + e)
+  } finally {
+    extracting.value = false
+  }
+}
+
+async function saveAsCombinedArticle() {
+  if (results.value.length === 0) return
+
+  extracting.value = true
+  try {
+    const saved = await addArticle({
+      title: combinedArticleTitle.value,
+      content: buildCombinedMarkdown(),
+      category: bookTitle.value,
+      description: combinedDescription.value,
+    })
+    appStore.addArticle(saved)
+    savedCount.value++
+    toast.success(`"${saved.title}" 已保存为保留目录层级的合集文章`)
+  } catch (e: any) {
+    toast.error('保存合集失败: ' + e)
   } finally {
     extracting.value = false
   }
@@ -252,6 +417,9 @@ function copyMarkdown(md: string) {
           <span class="toc-count">共 {{ flatToc.length }} 个章节</span>
         </div>
         <div class="toc-actions">
+          <button class="btn-sm import-book" :disabled="extracting || importingBook || !filePath" @click="importCurrentFileAsBook">
+            {{ importingBook ? '导入图书中...' : '直接导入为图书' }}
+          </button>
           <button class="btn-sm" @click="selectAll">全选</button>
           <button class="btn-sm" @click="deselectAll">取消全选</button>
           <button class="btn btn-primary" :disabled="!hasSelection || extracting" @click="extractSelected">
@@ -345,10 +513,24 @@ function copyMarkdown(md: string) {
       <div class="result-header">
         <h2>提取完成</h2>
         <div class="result-actions">
-          <button class="btn btn-primary" @click="saveAllToArticles" :disabled="extracting">
-            {{ extracting ? '保存中...' : `全部保存到文章库 (${results.length})` }}
+          <button class="btn btn-primary" @click="saveAsCombinedArticle" :disabled="extracting || !results.length">
+            {{ extracting ? '保存中...' : '保存为一本合集文章' }}
+          </button>
+          <button class="btn-sm" @click="saveAllToArticles" :disabled="extracting || !results.length">
+            {{ `按章节分别保存 (${results.length})` }}
           </button>
           <button class="btn-sm" @click="reset">重新选择</button>
+        </div>
+      </div>
+
+      <div class="result-summary">
+        <div class="summary-main">
+          <div class="summary-title">{{ combinedArticleTitle }}</div>
+          <div class="summary-desc">{{ combinedDescription }}</div>
+        </div>
+        <div class="summary-side">
+          <span class="summary-badge">推荐</span>
+          <span>按目录顺序合并</span>
         </div>
       </div>
 
@@ -356,8 +538,10 @@ function copyMarkdown(md: string) {
         <div v-for="(result, idx) in results" :key="idx" class="result-card">
           <div class="result-card-header" @click="previewIndex = previewIndex === idx ? -1 : idx">
             <div class="result-info">
-              <h3>{{ result.title || `章节 ${idx + 1}` }}</h3>
+              <h3>{{ result.toc.label || result.title || `章节 ${idx + 1}` }}</h3>
+              <div class="result-path">{{ result.toc.breadcrumbs.join(' / ') }}</div>
               <div class="result-stats">
+                <span>层级 {{ result.toc.level + 1 }}</span>
                 <span>{{ result.markdown.length.toLocaleString() }} 字符</span>
                 <span v-if="result.images.length">{{ result.images.length }} 张图片</span>
               </div>
@@ -612,6 +796,8 @@ function copyMarkdown(md: string) {
 .btn-sm:hover { border-color: var(--c-primary); color: var(--c-primary); background: rgba(0, 122, 255, 0.04); }
 .btn-sm.save { border-color: #86efac; color: #15803d; background: #f0fdf4; }
 .btn-sm.save:hover { background: #dcfce7; }
+.btn-sm.import-book { border-color: #bfdbfe; color: #1d4ed8; background: #eff6ff; }
+.btn-sm.import-book:hover { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
 
 /* Results */
 .result-header {
@@ -625,6 +811,52 @@ function copyMarkdown(md: string) {
 
 .result-header h2 { margin: 0; font-size: 1.2rem; }
 .result-actions { display: flex; gap: 8px; }
+
+.result-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 14px 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(99, 102, 241, 0.04));
+}
+
+.summary-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--c-text);
+}
+
+.summary-desc {
+  font-size: 0.85rem;
+  color: var(--c-text-lighter);
+}
+
+.summary-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: #1d4ed8;
+  white-space: nowrap;
+}
+
+.summary-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+}
 
 .result-list { display: flex; flex-direction: column; gap: 8px; }
 
@@ -647,6 +879,13 @@ function copyMarkdown(md: string) {
 }
 
 .result-info h3 { margin: 0 0 2px; font-size: 1rem; color: var(--c-text); }
+
+.result-path {
+  font-size: 0.8rem;
+  color: var(--c-text-lighter);
+  margin-bottom: 4px;
+  word-break: break-word;
+}
 
 .result-stats {
   display: flex;

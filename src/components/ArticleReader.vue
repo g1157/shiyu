@@ -108,6 +108,7 @@ const {
   tooltipState,
   quickLookupVisible,
   quickLookupType,
+  quickLookupAnchor,
   quickLookupSelectedText,
   quickLookupContextText,
   quickLookupWordPos,
@@ -540,6 +541,7 @@ watch(() => props.highlightId, (newId) => {
     <QuickLookupPanel
       :visible="quickLookupVisible"
       :type="quickLookupType"
+      :position="quickLookupAnchor"
       :selected-text="quickLookupSelectedText"
       :context-text="quickLookupContextText"
       :loading="quickLookupLoading"

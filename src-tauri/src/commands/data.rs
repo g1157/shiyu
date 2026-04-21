@@ -9,7 +9,7 @@ pub fn export_all_data(db: State<Database>) -> Result<ExportData, String> {
 
     // Export vocabulary
     let mut stmt = conn
-        .prepare("SELECT id, word, meaning, context, article_path, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review FROM vocabulary")
+        .prepare("SELECT id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review FROM vocabulary")
         .map_err(|e| e.to_string())?;
     let vocabulary = stmt
         .query_map([], |row| {
@@ -19,16 +19,19 @@ pub fn export_all_data(db: State<Database>) -> Result<ExportData, String> {
                 meaning: row.get(2)?,
                 context: row.get(3)?,
                 article_path: row.get(4)?,
-                review_count: row.get(5)?,
-                last_reviewed_at: row.get(6)?,
-                created_at: row.get(7)?,
-                srs_due: row.get(8)?,
-                srs_stability: row.get(9)?,
-                srs_difficulty: row.get(10)?,
-                srs_state: row.get(11)?,
-                srs_lapses: row.get(12)?,
-                srs_reps: row.get(13)?,
-                srs_last_review: row.get(14)?,
+                ebook_id: row.get(5)?,
+                ebook_cfi: row.get(6)?,
+                ebook_href: row.get(7)?,
+                review_count: row.get(8)?,
+                last_reviewed_at: row.get(9)?,
+                created_at: row.get(10)?,
+                srs_due: row.get(11)?,
+                srs_stability: row.get(12)?,
+                srs_difficulty: row.get(13)?,
+                srs_state: row.get(14)?,
+                srs_lapses: row.get(15)?,
+                srs_reps: row.get(16)?,
+                srs_last_review: row.get(17)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -37,7 +40,7 @@ pub fn export_all_data(db: State<Database>) -> Result<ExportData, String> {
 
     // Export sentences
     let mut stmt = conn
-        .prepare("SELECT id, sentence, explanation, article_path, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review FROM sentences")
+        .prepare("SELECT id, sentence, explanation, article_path, ebook_id, ebook_cfi, ebook_href, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review FROM sentences")
         .map_err(|e| e.to_string())?;
     let sentences = stmt
         .query_map([], |row| {
@@ -46,16 +49,19 @@ pub fn export_all_data(db: State<Database>) -> Result<ExportData, String> {
                 sentence: row.get(1)?,
                 explanation: row.get(2)?,
                 article_path: row.get(3)?,
-                review_count: row.get(4)?,
-                last_reviewed_at: row.get(5)?,
-                created_at: row.get(6)?,
-                srs_due: row.get(7)?,
-                srs_stability: row.get(8)?,
-                srs_difficulty: row.get(9)?,
-                srs_state: row.get(10)?,
-                srs_lapses: row.get(11)?,
-                srs_reps: row.get(12)?,
-                srs_last_review: row.get(13)?,
+                ebook_id: row.get(4)?,
+                ebook_cfi: row.get(5)?,
+                ebook_href: row.get(6)?,
+                review_count: row.get(7)?,
+                last_reviewed_at: row.get(8)?,
+                created_at: row.get(9)?,
+                srs_due: row.get(10)?,
+                srs_stability: row.get(11)?,
+                srs_difficulty: row.get(12)?,
+                srs_state: row.get(13)?,
+                srs_lapses: row.get(14)?,
+                srs_reps: row.get(15)?,
+                srs_last_review: row.get(16)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -121,8 +127,8 @@ pub fn import_data(db: State<Database>, data: ExportData, mode: String) -> Resul
     let mut vocab_count = 0;
     for item in &data.vocabulary {
         let result = tx.execute(
-            "INSERT OR IGNORE INTO vocabulary (id, word, meaning, context, article_path, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-            rusqlite::params![item.id, item.word, item.meaning, item.context, item.article_path, item.review_count, item.last_reviewed_at, item.created_at, item.srs_due, item.srs_stability, item.srs_difficulty, item.srs_state, item.srs_lapses, item.srs_reps, item.srs_last_review],
+            "INSERT OR IGNORE INTO vocabulary (id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            rusqlite::params![item.id, item.word, item.meaning, item.context, item.article_path, item.ebook_id, item.ebook_cfi, item.ebook_href, item.review_count, item.last_reviewed_at, item.created_at, item.srs_due, item.srs_stability, item.srs_difficulty, item.srs_state, item.srs_lapses, item.srs_reps, item.srs_last_review],
         );
         if result.is_ok() {
             vocab_count += 1;
@@ -132,8 +138,8 @@ pub fn import_data(db: State<Database>, data: ExportData, mode: String) -> Resul
     let mut sentence_count = 0;
     for item in &data.sentences {
         let result = tx.execute(
-            "INSERT OR IGNORE INTO sentences (id, sentence, explanation, article_path, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            rusqlite::params![item.id, item.sentence, item.explanation, item.article_path, item.review_count, item.last_reviewed_at, item.created_at, item.srs_due, item.srs_stability, item.srs_difficulty, item.srs_state, item.srs_lapses, item.srs_reps, item.srs_last_review],
+            "INSERT OR IGNORE INTO sentences (id, sentence, explanation, article_path, ebook_id, ebook_cfi, ebook_href, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            rusqlite::params![item.id, item.sentence, item.explanation, item.article_path, item.ebook_id, item.ebook_cfi, item.ebook_href, item.review_count, item.last_reviewed_at, item.created_at, item.srs_due, item.srs_stability, item.srs_difficulty, item.srs_state, item.srs_lapses, item.srs_reps, item.srs_last_review],
         );
         if result.is_ok() {
             sentence_count += 1;

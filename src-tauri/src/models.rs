@@ -11,6 +11,9 @@ pub struct VocabularyItem {
     pub meaning: String,
     pub context: Option<String>,
     pub article_path: Option<String>,
+    pub ebook_id: Option<String>,
+    pub ebook_cfi: Option<String>,
+    pub ebook_href: Option<String>,
     pub review_count: i64,
     pub last_reviewed_at: Option<i64>,
     pub created_at: i64,
@@ -30,6 +33,9 @@ pub struct AddVocabularyRequest {
     pub meaning: String,
     pub context: Option<String>,
     pub article_path: Option<String>,
+    pub ebook_id: Option<String>,
+    pub ebook_cfi: Option<String>,
+    pub ebook_href: Option<String>,
 }
 
 /// 全局聚合视图：按 word 分组，展示所有释义和来源文章
@@ -51,6 +57,9 @@ pub struct SentenceItem {
     pub sentence: String,
     pub explanation: String,
     pub article_path: Option<String>,
+    pub ebook_id: Option<String>,
+    pub ebook_cfi: Option<String>,
+    pub ebook_href: Option<String>,
     pub review_count: i64,
     pub last_reviewed_at: Option<i64>,
     pub created_at: i64,
@@ -69,6 +78,9 @@ pub struct AddSentenceRequest {
     pub sentence: String,
     pub explanation: String,
     pub article_path: Option<String>,
+    pub ebook_id: Option<String>,
+    pub ebook_cfi: Option<String>,
+    pub ebook_href: Option<String>,
 }
 
 // ── SRS Update ──────────────────────────────────────────
@@ -117,6 +129,29 @@ pub struct ParagraphItem {
 pub struct ArticleTranslateRequest {
     pub title: Option<String>,
     pub paragraphs: Vec<ParagraphItem>,
+}
+
+// ── Ebooks ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EbookItem {
+    pub id: String,
+    pub title: String,
+    pub file_path: String,
+    pub author: Option<String>,
+    pub format: String,
+    pub progress: f64,
+    pub cfi_position: Option<String>,
+    pub last_read_at: Option<i64>,
+    pub created_at: i64,
+    pub source_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateEbookProgressRequest {
+    pub id: String,
+    pub progress: f64,
+    pub cfi_position: Option<String>,
 }
 
 // ── Articles ────────────────────────────────────────────

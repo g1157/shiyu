@@ -11,10 +11,25 @@ pub fn get_vocabulary(db: State<Database>) -> Result<Vec<VocabularyItem>, String
 }
 
 #[tauri::command]
-pub fn get_vocabulary_by_article(db: State<Database>, article_id: String) -> Result<Vec<VocabularyItem>, String> {
+pub fn get_vocabulary_by_article(
+    db: State<Database>,
+    article_id: String,
+) -> Result<Vec<VocabularyItem>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let repo = VocabularyRepository::new();
-    repo.find_by_article(&conn, &article_id).map_err(|e| e.to_string())
+    repo.find_by_article(&conn, &article_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_vocabulary_by_ebook(
+    db: State<Database>,
+    ebook_id: String,
+) -> Result<Vec<VocabularyItem>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let repo = VocabularyRepository::new();
+    repo.find_by_ebook(&conn, &ebook_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -25,7 +40,10 @@ pub fn get_vocabulary_grouped(db: State<Database>) -> Result<Vec<VocabularyGroup
 }
 
 #[tauri::command]
-pub fn add_vocabulary(db: State<Database>, req: AddVocabularyRequest) -> Result<VocabularyItem, String> {
+pub fn add_vocabulary(
+    db: State<Database>,
+    req: AddVocabularyRequest,
+) -> Result<VocabularyItem, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let repo = VocabularyRepository::new();
     repo.create(&conn, req).map_err(|e| e.to_string())

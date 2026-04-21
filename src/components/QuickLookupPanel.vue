@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type CSSProperties } from 'vue'
+
+interface QuickLookupPosition {
+  top: number
+  left: number
+}
 
 const props = defineProps<{
   visible: boolean
   type: 'word' | 'sentence'
+  position?: QuickLookupPosition | null
   selectedText: string
   contextText?: string
   loading: boolean
@@ -40,12 +46,51 @@ const hasResult = computed(() => {
   return Boolean(props.translation?.trim() || props.parsedHtml?.trim())
 })
 const canSave = computed(() => hasResult.value && !props.loading && !props.saving)
+
+const panelPlacement = computed<'top' | 'bottom'>(() => {
+  if (!props.position || typeof window === 'undefined') return 'bottom'
+  return props.position.top > window.innerHeight * 0.5 ? 'top' : 'bottom'
+})
+
+const panelStyle = computed<CSSProperties>(() => {
+  if (!props.position || typeof window === 'undefined') {
+    return {
+      right: '92px',
+      bottom: '28px',
+    }
+  }
+
+  const sideMargin = 16
+  const viewportWidth = window.innerWidth
+  const panelWidth = Math.min(380, Math.max(280, viewportWidth - sideMargin * 2))
+  const left = Math.min(
+    Math.max(props.position.left - panelWidth / 2, sideMargin),
+    viewportWidth - panelWidth - sideMargin,
+  )
+  const style: CSSProperties = {
+    left: `${left}px`,
+    width: `${panelWidth}px`,
+  }
+
+  if (panelPlacement.value === 'top') {
+    style.bottom = `${Math.max(window.innerHeight - props.position.top + 18, sideMargin)}px`
+  } else {
+    style.top = `${Math.max(props.position.top + 18, sideMargin)}px`
+  }
+
+  return style
+})
 </script>
 
 <template>
   <teleport to="body">
     <transition name="qlp-fade">
-      <aside v-if="visible" class="quick-lookup-panel">
+      <aside
+        v-if="visible"
+        class="quick-lookup-panel"
+        :class="`quick-lookup-panel--${panelPlacement}`"
+        :style="panelStyle"
+      >
         <div class="qlp-header">
           <div class="qlp-header-main">
             <div class="qlp-title">{{ title }}</div>
@@ -146,8 +191,6 @@ const canSave = computed(() => hasResult.value && !props.loading && !props.savin
 <style scoped>
 .quick-lookup-panel {
   position: fixed;
-  right: 92px;
-  bottom: 28px;
   width: min(380px, calc(100vw - 32px));
   max-height: min(72vh, 680px);
   display: flex;
@@ -160,6 +203,28 @@ const canSave = computed(() => hasResult.value && !props.loading && !props.savin
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.14), 0 2px 10px rgba(15, 23, 42, 0.08);
   z-index: 1400;
   overflow: hidden;
+}
+
+.quick-lookup-panel--top::after,
+.quick-lookup-panel--bottom::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.quick-lookup-panel--top::after {
+  bottom: -8px;
+}
+
+.quick-lookup-panel--bottom::after {
+  top: -8px;
+  transform: translateX(-50%) rotate(225deg);
 }
 
 .qlp-header {
@@ -408,8 +473,6 @@ const canSave = computed(() => hasResult.value && !props.loading && !props.savin
 
 @media (max-width: 960px) {
   .quick-lookup-panel {
-    right: 16px;
-    bottom: 16px;
     width: min(420px, calc(100vw - 32px));
   }
 }

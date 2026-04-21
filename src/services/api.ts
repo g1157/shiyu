@@ -8,6 +8,9 @@ export interface VocabularyItem {
     meaning: string
     context?: string
     article_path?: string
+    ebook_id?: string
+    ebook_cfi?: string
+    ebook_href?: string
     review_count: number
     last_reviewed_at?: number
     created_at: number
@@ -26,6 +29,9 @@ export interface AddVocabularyRequest {
     meaning: string
     context?: string
     article_path?: string
+    ebook_id?: string
+    ebook_cfi?: string
+    ebook_href?: string
 }
 
 export async function getVocabulary(): Promise<VocabularyItem[]> {
@@ -34,6 +40,10 @@ export async function getVocabulary(): Promise<VocabularyItem[]> {
 
 export async function getVocabularyByArticle(articleId: string): Promise<VocabularyItem[]> {
     return invoke('get_vocabulary_by_article', { articleId })
+}
+
+export async function getVocabularyByEbook(ebookId: string): Promise<VocabularyItem[]> {
+    return invoke('get_vocabulary_by_ebook', { ebookId })
 }
 
 export interface VocabularyGrouped {
@@ -87,6 +97,9 @@ export interface SentenceItem {
     sentence: string
     explanation: string
     article_path?: string
+    ebook_id?: string
+    ebook_cfi?: string
+    ebook_href?: string
     review_count: number
     last_reviewed_at?: number
     created_at: number
@@ -104,6 +117,9 @@ export interface AddSentenceRequest {
     sentence: string
     explanation: string
     article_path?: string
+    ebook_id?: string
+    ebook_cfi?: string
+    ebook_href?: string
 }
 
 export async function getSentences(): Promise<SentenceItem[]> {
@@ -112,6 +128,10 @@ export async function getSentences(): Promise<SentenceItem[]> {
 
 export async function getSentencesByArticle(articleId: string): Promise<SentenceItem[]> {
     return invoke('get_sentences_by_article', { articleId })
+}
+
+export async function getSentencesByEbook(ebookId: string): Promise<SentenceItem[]> {
+    return invoke('get_sentences_by_ebook', { ebookId })
 }
 
 export async function addSentence(req: AddSentenceRequest): Promise<SentenceItem> {
@@ -205,6 +225,47 @@ export async function exportAllData(): Promise<ExportData> {
 
 export async function importData(data: ExportData, mode: string): Promise<string> {
     return invoke('import_data', { data, mode })
+}
+
+// ── Ebooks ──────────────────────────────────────────────
+
+export interface EbookItem {
+    id: string
+    title: string
+    file_path: string
+    author?: string
+    format: string
+    progress: number
+    cfi_position?: string
+    last_read_at?: number
+    created_at: number
+    source_hash?: string
+}
+
+export interface UpdateEbookProgressRequest {
+    id: string
+    progress: number
+    cfi_position?: string
+}
+
+export async function getEbooks(): Promise<EbookItem[]> {
+    return invoke('get_ebooks')
+}
+
+export async function getEbook(id: string): Promise<EbookItem> {
+    return invoke('get_ebook', { id })
+}
+
+export async function importEpubAsBook(filePath: string): Promise<EbookItem> {
+    return invoke('import_epub_as_book', { filePath })
+}
+
+export async function updateEbookProgress(req: UpdateEbookProgressRequest): Promise<EbookItem> {
+    return invoke('update_ebook_progress', { req })
+}
+
+export async function deleteEbook(id: string): Promise<void> {
+    return invoke('delete_ebook', { id })
 }
 
 // ── Articles ────────────────────────────────────────────

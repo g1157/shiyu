@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { splitSentenceExplanation } from '../utils/sentenceExplanation'
 import {
   deleteSentence,
+  getEbooks,
   updateSentenceReview,
+  type EbookItem,
   type SentenceItem,
 } from '../services/api'
 import { useTTS } from '../composables/useTTS'
@@ -21,6 +23,7 @@ const route = useRoute()
 const router = useRouter()
 
 const appStore = useAppStore()
+const ebooks = ref<EbookItem[]>([])
 
 const items = computed(() => appStore.sentences)
 const loading = ref(true)
@@ -96,6 +99,14 @@ async function loadSentences() {
   }
 }
 
+async function loadEbooks() {
+  try {
+    ebooks.value = await getEbooks()
+  } catch (e) {
+    console.error('加载书架标题失败:', e)
+  }
+}
+
 // formatDate is imported from '../utils/format'
 
 async function markReviewed(id: string) {
@@ -142,7 +153,7 @@ function cancelDelete() {
   deleteTargetId.value = null
 }
 
-async function resolveSourceRoute(sourcePath: string): Promise<{ path: '/articles'; query: Record<string, string> } | null> {
+async function resolveArticleRoute(sourcePath: string): Promise<{ path: '/articles'; query: Record<string, string> } | null> {
   const normalized = sourcePath.trim()
   if (!normalized) return null
 
@@ -160,13 +171,35 @@ async function resolveSourceRoute(sourcePath: string): Promise<{ path: '/article
   return null
 }
 
-async function goToArticle(sentence: SentenceItem) {
-  if (!sentence.article_path) {
-    toast.warning('该句子未关联文章，无法跳转')
+async function goToSource(sentence: SentenceItem) {
+  if (sentence.ebook_id && sentence.ebook_cfi) {
+    const exists = ebooks.value.some((item) => item.id === sentence.ebook_id)
+    if (!exists) {
+      await loadEbooks()
+    }
+    if (!ebooks.value.some((item) => item.id === sentence.ebook_id)) {
+      toast.warning('未找到关联图书，可能已从书架删除')
+      return
+    }
+
+    void router.push({
+      path: '/books',
+      query: {
+        bookId: sentence.ebook_id,
+        cfi: sentence.ebook_cfi,
+        highlight: sentence.id,
+        type: 'sentence',
+      },
+    })
     return
   }
 
-  const target = await resolveSourceRoute(sentence.article_path)
+  if (!sentence.article_path) {
+    toast.warning('该句子未关联文章或图书，无法跳转')
+    return
+  }
+
+  const target = await resolveArticleRoute(sentence.article_path)
   if (!target) {
     toast.warning('未找到关联原文，可能已删除或来源不受支持')
     return
@@ -182,8 +215,14 @@ async function goToArticle(sentence: SentenceItem) {
   })
 }
 
-// 获取文章标题
-function getArticleTitle(articlePath: string | undefined): string {
+function getSourceTitle(sentence: SentenceItem): string {
+  if (sentence.ebook_id) {
+    const ebook = ebooks.value.find((item) => item.id === sentence.ebook_id)
+    if (ebook) return ebook.title
+    return '图书原文'
+  }
+
+  const articlePath = sentence.article_path
   if (!articlePath) return ''
   const article = appStore.articles.find((a) => a.id === articlePath)
   if (article) return article.title
@@ -193,6 +232,7 @@ function getArticleTitle(articlePath: string | undefined): string {
 onMounted(async () => {
   // 预加载文章列表以解析标题
   appStore.fetchArticles()
+  loadEbooks()
   await loadSentences()
   initHighlight()
 })
@@ -200,6 +240,7 @@ onMounted(async () => {
 // KeepAlive: 切回句库时刷新数据
 onActivated(() => {
   loadSentences()
+  loadEbooks()
 })
 
 watch(filteredSentences, () => {
@@ -307,16 +348,16 @@ watch(
         <div class="sentence-footer">
           <div class="sentence-footer__left">
             <button
-              v-if="item.sentence.article_path"
+              v-if="item.sentence.article_path || item.sentence.ebook_id"
               class="sentence-source-link"
-              @click="goToArticle(item.sentence)"
-              :title="'来源：' + getArticleTitle(item.sentence.article_path)"
+              @click="goToSource(item.sentence)"
+              :title="'来源：' + getSourceTitle(item.sentence)"
             >
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <polyline points="14 2 14 8 20 8"/>
               </svg>
-              {{ getArticleTitle(item.sentence.article_path) }}
+              {{ getSourceTitle(item.sentence) }}
             </button>
             <span class="sentence-date">{{ formatDate(item.sentence.created_at) }}</span>
             <span class="sentence-review">复习 {{ item.sentence.review_count }} 次</span>
@@ -324,10 +365,10 @@ watch(
 
           <div class="sentence-actions">
             <button
-              v-if="item.sentence.article_path"
+              v-if="item.sentence.article_path || item.sentence.ebook_id"
               class="action-btn"
               title="跳转原文"
-              @click="goToArticle(item.sentence)"
+              @click="goToSource(item.sentence)"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             </button>

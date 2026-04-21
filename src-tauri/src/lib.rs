@@ -4,19 +4,25 @@ mod models;
 mod repositories;
 
 use commands::ai::{test_api_connection, translate_article_stream, translate_text};
+use commands::articles::{
+    add_article, delete_article, get_article, get_article_mindmap, get_articles,
+    save_article_mindmap, update_article,
+};
 use commands::config_pack::import_config_pack;
-use commands::articles::{add_article, delete_article, get_article, get_articles, update_article, get_article_mindmap, save_article_mindmap};
 use commands::data::{export_all_data, import_data};
+use commands::ebooks::{
+    delete_ebook, get_ebook, get_ebooks, import_epub_as_book, update_ebook_progress,
+};
 use commands::epub_tools::{extract_epub_chapter, extract_epub_chapters, parse_epub_toc};
 use commands::ocr::{ocr_extract_pages, ocr_refine_with_ai};
 use commands::sentences::{
-    add_sentence, delete_sentence, get_due_sentences, get_sentences,
-    get_sentences_by_article, update_sentence_review, update_sentence_srs,
+    add_sentence, delete_sentence, get_due_sentences, get_sentences, get_sentences_by_article,
+    get_sentences_by_ebook, update_sentence_review, update_sentence_srs,
 };
 use commands::settings::{delete_setting, get_all_settings, get_setting, set_setting};
 use commands::vocabulary::{
     add_vocabulary, delete_vocabulary, get_due_vocabulary, get_vocabulary,
-    get_vocabulary_by_article, get_vocabulary_grouped, update_vocabulary_review,
+    get_vocabulary_by_article, get_vocabulary_by_ebook, get_vocabulary_grouped, update_vocabulary_review,
     update_vocabulary_srs,
 };
 use db::Database;
@@ -34,6 +40,7 @@ pub fn run() {
             // Vocabulary
             get_vocabulary,
             get_vocabulary_by_article,
+            get_vocabulary_by_ebook,
             get_vocabulary_grouped,
             add_vocabulary,
             delete_vocabulary,
@@ -43,6 +50,7 @@ pub fn run() {
             // Sentences
             get_sentences,
             get_sentences_by_article,
+            get_sentences_by_ebook,
             add_sentence,
             delete_sentence,
             update_sentence_review,
@@ -68,6 +76,12 @@ pub fn run() {
             delete_article,
             get_article_mindmap,
             save_article_mindmap,
+            // Ebooks
+            get_ebooks,
+            get_ebook,
+            import_epub_as_book,
+            update_ebook_progress,
+            delete_ebook,
             // EPUB Tools
             parse_epub_toc,
             extract_epub_chapter,

@@ -38,6 +38,11 @@ interface AnnotationDraftState {
   structureNote: string
 }
 
+interface QuickLookupAnchorPosition {
+  top: number
+  left: number
+}
+
 function parseModelResult(text: string) {
   const raw = text.trim()
   try {
@@ -98,6 +103,7 @@ export function useAnnotationInteraction(
   const quickLookupSaving = ref(false)
   const quickLookupError = ref('')
   const quickLookupDeepError = ref('')
+  const quickLookupAnchor = ref<QuickLookupAnchorPosition | null>(null)
   let tooltipHideTimeout: ReturnType<typeof setTimeout> | null = null
   let quickLookupRequestId = 0
   let quickLookupDeepRequestId = 0
@@ -179,10 +185,15 @@ export function useAnnotationInteraction(
 
     const selectedText = selection.value.text
     const contextText = getContext()
+    const anchor = {
+      top: popoverPosition.value.top,
+      left: popoverPosition.value.left,
+    }
 
     quickLookupType.value = type
     quickLookupSelectedText.value = selectedText
     quickLookupContextText.value = contextText
+    quickLookupAnchor.value = anchor
     quickLookupVisible.value = true
     quickLookupLoading.value = true
     quickLookupDeepLoading.value = false
@@ -234,6 +245,7 @@ export function useAnnotationInteraction(
     quickLookupSaving.value = false
     quickLookupSelectedText.value = ''
     quickLookupContextText.value = ''
+    quickLookupAnchor.value = null
     resetQuickLookupData()
   }
 
@@ -470,6 +482,7 @@ export function useAnnotationInteraction(
     tooltipState,
     quickLookupVisible,
     quickLookupType,
+    quickLookupAnchor,
     quickLookupSelectedText,
     quickLookupContextText,
     quickLookupWordPos,

@@ -30,6 +30,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('./views/ArticlesView.vue'),
     },
     {
+        path: '/books',
+        name: 'books',
+        component: () => import('./views/BooksView.vue'),
+    },
+    {
         path: '/epub-import',
         name: 'epub-import',
         component: () => import('./views/EpubImportView.vue'),

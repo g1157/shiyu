@@ -3,7 +3,7 @@ use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-const CURRENT_SCHEMA_VERSION: i32 = 3;
+const CURRENT_SCHEMA_VERSION: i32 = 5;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -22,6 +22,7 @@ impl Database {
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
         Self::initialize_tables(&conn)?;
         Self::run_migrations(&conn)?;
+        Self::ensure_indexes(&conn)?;
         Self::check_version_announcement(&conn);
 
         Ok(Database {
@@ -40,16 +41,10 @@ impl Database {
             )
             .ok();
         if stored.as_deref() != Some(current) && stored.is_some() {
-            conn.execute(
-                "DELETE FROM settings WHERE key = 'last_seen_version'",
-                [],
-            )
-            .ok();
+            conn.execute("DELETE FROM settings WHERE key = 'last_seen_version'", [])
+                .ok();
         }
     }
-
-
-
 
     fn resolve_db_path() -> PathBuf {
         let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -70,18 +65,17 @@ impl Database {
 
     /// 运行数据库迁移
     fn run_migrations(conn: &Connection) -> Result<()> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
         let current_version = Self::get_schema_version(conn)?;
 
         if current_version < CURRENT_SCHEMA_VERSION {
-            // 创建schema_migrations表（如果不存在）
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS schema_migrations (
-                    version INTEGER PRIMARY KEY,
-                    applied_at INTEGER NOT NULL
-                )",
-                [],
-            )?;
-
             // 应用迁移
             Self::apply_migration(conn, current_version)?;
 
@@ -96,6 +90,34 @@ impl Database {
         Ok(())
     }
 
+    fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+        let sql = format!("PRAGMA table_info({table})");
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let existing: String = row.get(1)?;
+            if existing == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn add_column_if_missing(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+        definition: &str,
+    ) -> Result<()> {
+        if Self::column_exists(conn, table, column)? {
+            return Ok(());
+        }
+
+        let sql = format!("ALTER TABLE {table} ADD COLUMN {definition}");
+        conn.execute(&sql, [])?;
+        Ok(())
+    }
+
     /// 应用具体的迁移（逐版本递进）
     fn apply_migration(conn: &Connection, from_version: i32) -> Result<()> {
         if from_version < 1 {
@@ -104,40 +126,131 @@ impl Database {
                 CREATE INDEX IF NOT EXISTS idx_vocabulary_article_path ON vocabulary(article_path);
                 CREATE INDEX IF NOT EXISTS idx_sentences_article_path ON sentences(article_path);
                 CREATE INDEX IF NOT EXISTS idx_articles_created_at ON articles(created_at);
-                "
+                ",
             )?;
         }
 
         if from_version < 2 {
             // v2: 添加 FSRS 间隔重复字段
+            Self::add_column_if_missing(conn, "vocabulary", "srs_due", "srs_due INTEGER")?;
+            Self::add_column_if_missing(
+                conn,
+                "vocabulary",
+                "srs_stability",
+                "srs_stability REAL NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "vocabulary",
+                "srs_difficulty",
+                "srs_difficulty REAL NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "vocabulary",
+                "srs_state",
+                "srs_state INTEGER NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "vocabulary",
+                "srs_lapses",
+                "srs_lapses INTEGER NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "vocabulary",
+                "srs_reps",
+                "srs_reps INTEGER NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "vocabulary",
+                "srs_last_review",
+                "srs_last_review INTEGER",
+            )?;
+
+            Self::add_column_if_missing(conn, "sentences", "srs_due", "srs_due INTEGER")?;
+            Self::add_column_if_missing(
+                conn,
+                "sentences",
+                "srs_stability",
+                "srs_stability REAL NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "sentences",
+                "srs_difficulty",
+                "srs_difficulty REAL NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "sentences",
+                "srs_state",
+                "srs_state INTEGER NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "sentences",
+                "srs_lapses",
+                "srs_lapses INTEGER NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "sentences",
+                "srs_reps",
+                "srs_reps INTEGER NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "sentences",
+                "srs_last_review",
+                "srs_last_review INTEGER",
+            )?;
+
             conn.execute_batch(
                 "
-                ALTER TABLE vocabulary ADD COLUMN srs_due INTEGER;
-                ALTER TABLE vocabulary ADD COLUMN srs_stability REAL NOT NULL DEFAULT 0;
-                ALTER TABLE vocabulary ADD COLUMN srs_difficulty REAL NOT NULL DEFAULT 0;
-                ALTER TABLE vocabulary ADD COLUMN srs_state INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE vocabulary ADD COLUMN srs_lapses INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE vocabulary ADD COLUMN srs_reps INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE vocabulary ADD COLUMN srs_last_review INTEGER;
-
-                ALTER TABLE sentences ADD COLUMN srs_due INTEGER;
-                ALTER TABLE sentences ADD COLUMN srs_stability REAL NOT NULL DEFAULT 0;
-                ALTER TABLE sentences ADD COLUMN srs_difficulty REAL NOT NULL DEFAULT 0;
-                ALTER TABLE sentences ADD COLUMN srs_state INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE sentences ADD COLUMN srs_lapses INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE sentences ADD COLUMN srs_reps INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE sentences ADD COLUMN srs_last_review INTEGER;
-
                 CREATE INDEX IF NOT EXISTS idx_vocabulary_srs_due ON vocabulary(srs_due);
                 CREATE INDEX IF NOT EXISTS idx_sentences_srs_due ON sentences(srs_due);
-                "
+                ",
             )?;
         }
 
         if from_version < 3 {
             // v3: 思维导图持久化
+            Self::add_column_if_missing(
+                conn,
+                "articles",
+                "mindmap_markdown",
+                "mindmap_markdown TEXT",
+            )?;
+        }
+
+        if from_version < 4 {
+            // v4: 图书导入去重与书架支持
+            Self::add_column_if_missing(conn, "ebooks", "source_hash", "source_hash TEXT")?;
             conn.execute_batch(
-                "ALTER TABLE articles ADD COLUMN mindmap_markdown TEXT;"
+                "
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_ebooks_source_hash ON ebooks(source_hash);
+                CREATE INDEX IF NOT EXISTS idx_ebooks_last_read_at ON ebooks(last_read_at);
+                ",
+            )?;
+        }
+
+        if from_version < 5 {
+            // v5: 生词/句子支持图书锚点，便于回跳 EPUB 原文
+            Self::add_column_if_missing(conn, "vocabulary", "ebook_id", "ebook_id TEXT")?;
+            Self::add_column_if_missing(conn, "vocabulary", "ebook_cfi", "ebook_cfi TEXT")?;
+            Self::add_column_if_missing(conn, "vocabulary", "ebook_href", "ebook_href TEXT")?;
+            Self::add_column_if_missing(conn, "sentences", "ebook_id", "ebook_id TEXT")?;
+            Self::add_column_if_missing(conn, "sentences", "ebook_cfi", "ebook_cfi TEXT")?;
+            Self::add_column_if_missing(conn, "sentences", "ebook_href", "ebook_href TEXT")?;
+
+            conn.execute_batch(
+                "
+                CREATE INDEX IF NOT EXISTS idx_vocabulary_ebook_id ON vocabulary(ebook_id);
+                CREATE INDEX IF NOT EXISTS idx_sentences_ebook_id ON sentences(ebook_id);
+                ",
             )?;
         }
 
@@ -153,9 +266,19 @@ impl Database {
                 meaning TEXT NOT NULL,
                 context TEXT,
                 article_path TEXT,
+                ebook_id TEXT,
+                ebook_cfi TEXT,
+                ebook_href TEXT,
                 review_count INTEGER NOT NULL DEFAULT 0,
                 last_reviewed_at INTEGER,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                srs_due INTEGER,
+                srs_stability REAL NOT NULL DEFAULT 0,
+                srs_difficulty REAL NOT NULL DEFAULT 0,
+                srs_state INTEGER NOT NULL DEFAULT 0,
+                srs_lapses INTEGER NOT NULL DEFAULT 0,
+                srs_reps INTEGER NOT NULL DEFAULT 0,
+                srs_last_review INTEGER
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_word_path
@@ -166,9 +289,19 @@ impl Database {
                 sentence TEXT NOT NULL,
                 explanation TEXT NOT NULL,
                 article_path TEXT,
+                ebook_id TEXT,
+                ebook_cfi TEXT,
+                ebook_href TEXT,
                 review_count INTEGER NOT NULL DEFAULT 0,
                 last_reviewed_at INTEGER,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                srs_due INTEGER,
+                srs_stability REAL NOT NULL DEFAULT 0,
+                srs_difficulty REAL NOT NULL DEFAULT 0,
+                srs_state INTEGER NOT NULL DEFAULT 0,
+                srs_lapses INTEGER NOT NULL DEFAULT 0,
+                srs_reps INTEGER NOT NULL DEFAULT 0,
+                srs_last_review INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS settings (
@@ -184,7 +317,8 @@ impl Database {
                 category TEXT,
                 description TEXT,
                 word_count INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                mindmap_markdown TEXT
             );
 
             CREATE TABLE IF NOT EXISTS ebooks (
@@ -196,7 +330,8 @@ impl Database {
                 progress REAL NOT NULL DEFAULT 0.0,
                 cfi_position TEXT,
                 last_read_at INTEGER,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                source_hash TEXT
             );
 
             -- Schema版本表（用于迁移）
@@ -209,11 +344,25 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_vocabulary_article_path ON vocabulary(article_path);
             CREATE INDEX IF NOT EXISTS idx_sentences_article_path ON sentences(article_path);
             CREATE INDEX IF NOT EXISTS idx_articles_created_at ON articles(created_at);
+            ",
+        )?;
+        Ok(())
+    }
 
-            -- 插入初始版本
-            INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-            SELECT 1, strftime('%s', 'now') * 1000
-            WHERE NOT EXISTS (SELECT 1 FROM schema_migrations);
+    fn ensure_indexes(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_word_path
+                ON vocabulary(word, article_path);
+            CREATE INDEX IF NOT EXISTS idx_vocabulary_article_path ON vocabulary(article_path);
+            CREATE INDEX IF NOT EXISTS idx_sentences_article_path ON sentences(article_path);
+            CREATE INDEX IF NOT EXISTS idx_vocabulary_srs_due ON vocabulary(srs_due);
+            CREATE INDEX IF NOT EXISTS idx_sentences_srs_due ON sentences(srs_due);
+            CREATE INDEX IF NOT EXISTS idx_vocabulary_ebook_id ON vocabulary(ebook_id);
+            CREATE INDEX IF NOT EXISTS idx_sentences_ebook_id ON sentences(ebook_id);
+            CREATE INDEX IF NOT EXISTS idx_articles_created_at ON articles(created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ebooks_source_hash ON ebooks(source_hash);
+            CREATE INDEX IF NOT EXISTS idx_ebooks_last_read_at ON ebooks(last_read_at);
             ",
         )?;
         Ok(())

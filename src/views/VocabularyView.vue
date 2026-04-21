@@ -3,8 +3,10 @@ import { computed, onMounted, onActivated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   deleteVocabulary,
+  getEbooks,
   getVocabularyGrouped,
   updateVocabularyReview,
+  type EbookItem,
   type VocabularyGrouped,
   type VocabularyItem,
 } from '../services/api'
@@ -31,6 +33,7 @@ const showDeleteConfirm = ref(false)
 const deleteTargetId = ref<string | null>(null)
 const sortBy = ref<'date' | 'alpha' | 'review'>('date')
 const expandedWords = ref<Set<string>>(new Set())
+const ebooks = ref<EbookItem[]>([])
 
 let isDeleting = false
 
@@ -107,6 +110,14 @@ async function loadVocabulary() {
   }
 }
 
+async function loadEbooks() {
+  try {
+    ebooks.value = await getEbooks()
+  } catch (e) {
+    console.error('加载书架标题失败:', e)
+  }
+}
+
 function toggleExpand(word: string) {
   const s = new Set(expandedWords.value)
   if (s.has(word)) {
@@ -119,6 +130,14 @@ function toggleExpand(word: string) {
 
 function isExpanded(word: string) {
   return expandedWords.value.has(word)
+}
+
+function getSourceCount(group: VocabularyGrouped) {
+  return new Set(
+    group.entries
+      .flatMap((entry) => [entry.article_path, entry.ebook_id])
+      .filter((value): value is string => Boolean(value))
+  ).size
 }
 
 async function markReviewed(id: string) {
@@ -160,7 +179,9 @@ async function confirmDelete() {
       if (idx !== -1) {
         g.entries.splice(idx, 1)
         g.article_count = new Set(
-          g.entries.filter((e) => e.article_path).map((e) => e.article_path)
+          g.entries
+            .flatMap((e) => [e.article_path, e.ebook_id])
+            .filter((value): value is string => Boolean(value))
         ).size
         // 如果该组已空，移除整个组
         if (g.entries.length === 0) {
@@ -188,10 +209,32 @@ function cancelDelete() {
 
 
 
-// 跳转到文章
-async function goToArticle(entry: VocabularyItem) {
+// 跳转到原文
+async function goToSource(entry: VocabularyItem) {
+  if (entry.ebook_id && entry.ebook_cfi) {
+    const exists = ebooks.value.some((item) => item.id === entry.ebook_id)
+    if (!exists) {
+      await loadEbooks()
+    }
+    if (!ebooks.value.some((item) => item.id === entry.ebook_id)) {
+      toast.warning('未找到关联图书，可能已从书架删除')
+      return
+    }
+
+    void router.push({
+      path: '/books',
+      query: {
+        bookId: entry.ebook_id,
+        cfi: entry.ebook_cfi,
+        highlight: entry.id,
+        type: 'word',
+      },
+    })
+    return
+  }
+
   if (!entry.article_path) {
-    toast.warning('该单词未关联文章，无法跳转')
+    toast.warning('该单词未关联文章或图书，无法跳转')
     return
   }
 
@@ -210,8 +253,14 @@ async function goToArticle(entry: VocabularyItem) {
   toast.warning('未找到关联原文')
 }
 
-// 获取文章标题（用于显示）
-function getArticleTitle(articlePath: string | undefined): string {
+function getSourceTitle(entry: VocabularyItem): string {
+  if (entry.ebook_id) {
+    const ebook = ebooks.value.find((item) => item.id === entry.ebook_id)
+    if (ebook) return ebook.title
+    return '图书原文'
+  }
+
+  const articlePath = entry.article_path
   if (!articlePath) return '未知来源'
   const article = appStore.articles.find((a) => a.id === articlePath)
   if (article) return article.title
@@ -222,6 +271,7 @@ function getArticleTitle(articlePath: string | undefined): string {
 onMounted(async () => {
   // 预加载文章列表以解析标题
   appStore.fetchArticles()
+  loadEbooks()
   await loadVocabulary()
   initHighlight()
 })
@@ -229,6 +279,7 @@ onMounted(async () => {
 // KeepAlive: 切回生词本时刷新数据
 onActivated(() => {
   loadVocabulary()
+  loadEbooks()
 })
 
 watch(filteredGrouped, () => {
@@ -392,12 +443,12 @@ watch(
             </div>
           </div>
           <div class="grouped-header__right">
-            <span v-if="group.article_count > 0" class="article-count-badge" :title="`出现在 ${group.article_count} 篇文章`">
+            <span v-if="getSourceCount(group) > 0" class="article-count-badge" :title="`出现在 ${getSourceCount(group)} 个原文来源`">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <polyline points="14 2 14 8 20 8"/>
               </svg>
-              {{ group.article_count }}
+              {{ getSourceCount(group) }}
             </span>
             <span v-if="group.total_review_count > 0" class="review-badge">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -422,14 +473,20 @@ watch(
               :key="entry.id"
               class="grouped-entry"
             >
-              <button class="entry-article-link" @click="goToArticle(entry)" :title="getArticleTitle(entry.article_path)">
+              <button
+                v-if="entry.article_path || entry.ebook_id"
+                class="entry-article-link"
+                @click="goToSource(entry)"
+                :title="getSourceTitle(entry)"
+              >
                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                   <polyline points="15 3 21 3 21 9"/>
                   <line x1="10" y1="14" x2="21" y2="3"/>
                 </svg>
-                {{ getArticleTitle(entry.article_path) }}
+                {{ getSourceTitle(entry) }}
               </button>
+              <span v-else class="entry-article-link entry-article-link--disabled">无来源锚点</span>
               <span class="entry-date">{{ formatDate(entry.created_at) }}</span>
               <div class="entry-actions">
                 <button class="action-btn action-btn--review" title="标记复习" @click="markReviewed(entry.id)">

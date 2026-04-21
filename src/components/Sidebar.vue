@@ -26,6 +26,7 @@ interface RecentRouteEntry {
 const navItems: NavItem[] = [
   { label: '首页', to: '/', icon: 'home', shortcut: '', group: 'main' },
   { label: '文章', to: '/articles', icon: 'article', shortcut: '', group: 'main' },
+  { label: '图书', to: '/books', icon: 'library', shortcut: '', group: 'main' },
   { label: '生词', to: '/vocabulary', icon: 'book', shortcut: '', group: 'main' },
   { label: '句库', to: '/sentences', icon: 'text', shortcut: '', group: 'main' },
   { label: '复习', to: '/review', icon: 'review', shortcut: '', group: 'main' },
@@ -184,6 +185,7 @@ onUnmounted(() => {
         <svg v-if="item.icon === 'home'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h5v-5.5a2 2 0 012-2h0a2 2 0 012 2V21h5V9.5"/></svg>
         <!-- 生词本 — character.book.closed style -->
         <svg v-else-if="item.icon === 'book'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><path d="M9 7h6"/><path d="M9 11h4"/></svg>
+        <svg v-else-if="item.icon === 'library'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 20V6"/><path d="M8 20V4"/><path d="M12 20V8"/><path d="M16 20V5"/><path d="M20 20V10"/><path d="M3 20h18"/></svg>
         <!-- 句库 — text.quote style -->
         <svg v-else-if="item.icon === 'text'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 6H3"/><path d="M21 12H8"/><path d="M17 18H3"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
         <!-- 文章 — book.open style -->

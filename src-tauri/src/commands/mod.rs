@@ -2,6 +2,7 @@ pub mod ai;
 pub mod articles;
 pub mod config_pack;
 pub mod data;
+pub mod ebooks;
 pub mod epub_tools;
 pub mod ocr;
 pub mod sentences;

@@ -41,6 +41,7 @@ onMounted(async () => {
 /* ── 快捷操作 ── */
 const quickActions = [
   { label: 'AI 翻译', desc: '智能翻译单词或句子', icon: 'ai', route: '/translate', color: '#007AFF' },
+  { label: '书架', desc: '直接阅读导入的 EPUB 图书', icon: 'library', route: '/books', color: '#6366F1' },
   { label: '生词本', desc: '管理你的词汇积累', icon: 'book', route: '/vocabulary', color: '#5856D6' },
   { label: '句库', desc: '收藏精彩长难句', icon: 'text', route: '/sentences', color: '#FF9500' },
   { label: '文章阅读', desc: '沉浸式英文阅读', icon: 'article', route: '/articles', color: '#34C759' },
@@ -127,6 +128,8 @@ function go(route: string) {
             <svg v-if="action.icon === 'ai'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
             <!-- 生词本 — book.closed -->
             <svg v-else-if="action.icon === 'book'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><path d="M9 7h6"/><path d="M9 11h4"/></svg>
+            <!-- 书架 — library -->
+            <svg v-else-if="action.icon === 'library'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 20V6"/><path d="M8 20V4"/><path d="M12 20V8"/><path d="M16 20V5"/><path d="M20 20V10"/><path d="M3 20h18"/></svg>
             <!-- 句库 — text.quote -->
             <svg v-else-if="action.icon === 'text'" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 6H3"/><path d="M21 12H8"/><path d="M17 18H3"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
             <!-- 文章 — book.open -->

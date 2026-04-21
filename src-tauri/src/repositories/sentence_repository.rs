@@ -12,23 +12,27 @@ impl FromRow for SentenceItem {
             sentence: row.get(1)?,
             explanation: row.get(2)?,
             article_path: row.get(3)?,
-            review_count: row.get(4)?,
-            last_reviewed_at: row.get(5)?,
-            created_at: row.get(6)?,
-            srs_due: row.get(7)?,
-            srs_stability: row.get(8)?,
-            srs_difficulty: row.get(9)?,
-            srs_state: row.get(10)?,
-            srs_lapses: row.get(11)?,
-            srs_reps: row.get(12)?,
-            srs_last_review: row.get(13)?,
+            ebook_id: row.get(4)?,
+            ebook_cfi: row.get(5)?,
+            ebook_href: row.get(6)?,
+            review_count: row.get(7)?,
+            last_reviewed_at: row.get(8)?,
+            created_at: row.get(9)?,
+            srs_due: row.get(10)?,
+            srs_stability: row.get(11)?,
+            srs_difficulty: row.get(12)?,
+            srs_state: row.get(13)?,
+            srs_lapses: row.get(14)?,
+            srs_reps: row.get(15)?,
+            srs_last_review: row.get(16)?,
         })
     }
 }
 
 const SENTENCE_SELECT: &str =
-    "SELECT id, sentence, explanation, article_path, review_count, last_reviewed_at, created_at,
-            srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review
+    "SELECT id, sentence, explanation, article_path, ebook_id, ebook_cfi, ebook_href,
+            review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty,
+            srs_state, srs_lapses, srs_reps, srs_last_review
      FROM sentences";
 
 /// 句子Repository
@@ -52,8 +56,15 @@ impl SentenceRepository {
     }
 
     /// 根据文章ID查找关联句子
-    pub fn find_by_article(&self, conn: &MutexGuard<Connection>, article_path: &str) -> Result<Vec<SentenceItem>> {
-        let sql = format!("{} WHERE article_path = ?1 ORDER BY created_at DESC", SENTENCE_SELECT);
+    pub fn find_by_article(
+        &self,
+        conn: &MutexGuard<Connection>,
+        article_path: &str,
+    ) -> Result<Vec<SentenceItem>> {
+        let sql = format!(
+            "{} WHERE article_path = ?1 ORDER BY created_at DESC",
+            SENTENCE_SELECT
+        );
         let mut stmt = conn.prepare(&sql)?;
 
         let items = stmt
@@ -63,8 +74,30 @@ impl SentenceRepository {
         Ok(items)
     }
 
+    pub fn find_by_ebook(
+        &self,
+        conn: &MutexGuard<Connection>,
+        ebook_id: &str,
+    ) -> Result<Vec<SentenceItem>> {
+        let sql = format!(
+            "{} WHERE ebook_id = ?1 ORDER BY created_at DESC",
+            SENTENCE_SELECT
+        );
+        let mut stmt = conn.prepare(&sql)?;
+
+        let items = stmt
+            .query_map([ebook_id], |row| SentenceItem::from_row(row))?
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(items)
+    }
+
     /// 获取到期待复习的句子
-    pub fn find_due(&self, conn: &MutexGuard<Connection>, now_ms: i64) -> Result<Vec<SentenceItem>> {
+    pub fn find_due(
+        &self,
+        conn: &MutexGuard<Connection>,
+        now_ms: i64,
+    ) -> Result<Vec<SentenceItem>> {
         let sql = format!(
             "{} WHERE (srs_due IS NULL OR srs_due <= ?1) AND srs_state != -1 ORDER BY srs_due ASC",
             SENTENCE_SELECT
@@ -79,14 +112,28 @@ impl SentenceRepository {
     }
 
     /// 添加句子
-    pub fn create(&self, conn: &MutexGuard<Connection>, req: AddSentenceRequest) -> Result<SentenceItem> {
+    pub fn create(
+        &self,
+        conn: &MutexGuard<Connection>,
+        req: AddSentenceRequest,
+    ) -> Result<SentenceItem> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
 
         conn.execute(
-            "INSERT INTO sentences (id, sentence, explanation, article_path, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![id, req.sentence, req.explanation, req.article_path, now],
+            "INSERT INTO sentences (
+                id, sentence, explanation, article_path, ebook_id, ebook_cfi, ebook_href, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                id,
+                req.sentence,
+                req.explanation,
+                req.article_path,
+                req.ebook_id,
+                req.ebook_cfi,
+                req.ebook_href,
+                now
+            ],
         )?;
 
         Ok(SentenceItem {
@@ -94,6 +141,9 @@ impl SentenceRepository {
             sentence: req.sentence,
             explanation: req.explanation,
             article_path: req.article_path,
+            ebook_id: req.ebook_id,
+            ebook_cfi: req.ebook_cfi,
+            ebook_href: req.ebook_href,
             review_count: 0,
             last_reviewed_at: None,
             created_at: now,
@@ -122,7 +172,11 @@ impl SentenceRepository {
     }
 
     /// 更新 SRS 状态（FSRS 算法计算后的结果）
-    pub fn update_srs(&self, conn: &MutexGuard<Connection>, req: &UpdateSrsRequest) -> Result<usize> {
+    pub fn update_srs(
+        &self,
+        conn: &MutexGuard<Connection>,
+        req: &UpdateSrsRequest,
+    ) -> Result<usize> {
         let now = Utc::now().timestamp_millis();
         conn.execute(
             "UPDATE sentences SET
@@ -151,10 +205,14 @@ impl SentenceRepository {
     }
 
     /// 根据文章路径删除所有关联句子
-    pub fn delete_by_article(&self, conn: &MutexGuard<Connection>, article_path: &str) -> Result<usize> {
+    pub fn delete_by_article(
+        &self,
+        conn: &MutexGuard<Connection>,
+        article_path: &str,
+    ) -> Result<usize> {
         conn.execute(
             "DELETE FROM sentences WHERE article_path = ?1",
-            [article_path]
+            [article_path],
         )
     }
 }

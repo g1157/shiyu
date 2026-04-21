@@ -10,13 +10,21 @@ import {
 import { preCacheText } from '../services/ttsCache'
 import { useAppStore } from '../stores/appStore'
 
+interface AnnotationSourcePayload {
+    article_path?: string
+    ebook_id?: string
+    ebook_cfi?: string
+    ebook_href?: string
+}
+
 /**
  * 文章标注系统
  * 管理生词/长难句数据，提供 DOM 高亮渲染和悬浮提示能力
  */
 export function useAnnotation(
     containerRef: Ref<HTMLElement | null>,
-    articleId: Ref<string | null>
+    articleId: Ref<string | null>,
+    sourceResolver?: () => AnnotationSourcePayload
 ) {
     const vocabulary = ref<VocabularyItem[]>([])
     const sentences = ref<SentenceItem[]>([])
@@ -44,12 +52,14 @@ export function useAnnotation(
     // ── 添加操作（写入后端）──────────────────────────────
 
     async function saveWord(word: string, meaning: string, context: string) {
-        const currentId = articleId.value ?? undefined
+        const resolvedSource = sourceResolver?.() ?? {
+            article_path: articleId.value ?? undefined,
+        }
         const item = await addVocabulary({
             word,
             meaning,
             context: context || undefined,
-            article_path: currentId,
+            ...resolvedSource,
         })
         vocabulary.value.unshift(item)
         // 同步到全局 appStore，让生词本页面能看到
@@ -66,11 +76,13 @@ export function useAnnotation(
     }
 
     async function saveSentence(sentence: string, explanation: string) {
-        const currentId = articleId.value ?? undefined
+        const resolvedSource = sourceResolver?.() ?? {
+            article_path: articleId.value ?? undefined,
+        }
         const item = await addSentence({
             sentence,
             explanation,
-            article_path: currentId,
+            ...resolvedSource,
         })
         sentences.value.unshift(item)
         // 同步到全局 appStore，让句库页面能看到

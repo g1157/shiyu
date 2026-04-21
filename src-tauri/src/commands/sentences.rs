@@ -11,10 +11,25 @@ pub fn get_sentences(db: State<Database>) -> Result<Vec<SentenceItem>, String> {
 }
 
 #[tauri::command]
-pub fn get_sentences_by_article(db: State<Database>, article_id: String) -> Result<Vec<SentenceItem>, String> {
+pub fn get_sentences_by_article(
+    db: State<Database>,
+    article_id: String,
+) -> Result<Vec<SentenceItem>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let repo = SentenceRepository::new();
-    repo.find_by_article(&conn, &article_id).map_err(|e| e.to_string())
+    repo.find_by_article(&conn, &article_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_sentences_by_ebook(
+    db: State<Database>,
+    ebook_id: String,
+) -> Result<Vec<SentenceItem>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let repo = SentenceRepository::new();
+    repo.find_by_ebook(&conn, &ebook_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
