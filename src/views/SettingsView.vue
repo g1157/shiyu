@@ -48,7 +48,7 @@ onUnmounted(() => {
 
 // ── 帮助卡片 ──
 const helpTips = [
-  { icon: '📖', title: '智能阅读', desc: '选中单词或句子，一键添加到生词本和句库，AI 自动生成释义' },
+  { icon: '📖', title: '智能阅读', desc: '选中单词或句子后先后台生成结果，不打断阅读，再决定保存或编辑' },
   { icon: '🔄', title: '间隔复习', desc: '基于 FSRS 算法智能安排复习，用 1-4 键快速评分' },
   { icon: '📋', title: '长难句解析', desc: 'AI 自动分析句子成分，主谓宾定状一目了然' },
   { icon: '🌐', title: 'AI 翻译', desc: '单词/句子翻译，结果可直接存入生词本或句库' },
@@ -612,4 +612,3 @@ async function handleTest() {
 
 
 </style>
-

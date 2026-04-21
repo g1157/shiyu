@@ -7,6 +7,10 @@ const props = defineProps<{
   selectedText: string
   contextText?: string
   type: 'word' | 'sentence'
+  initialMeaning?: string
+  initialSentenceTranslation?: string
+  initialStructureParsed?: string
+  initialStructureNote?: string
 }>()
 
 const emit = defineEmits<{
@@ -14,16 +18,16 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-const meaning = ref('')
-const sentenceTranslation = ref('')
+const meaning = ref(props.initialMeaning || '')
+const sentenceTranslation = ref(props.initialSentenceTranslation || '')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const isGenerating = ref(false)
 const generateError = ref('')
 const MAX_CONTEXT_LENGTH = 200
 
 // 句子成分划分
-const structureParsed = ref('')
-const structureNote = ref('')
+const structureParsed = ref(props.initialStructureParsed || '')
+const structureNote = ref(props.initialStructureNote || '')
 const isParsing = ref(false)
 const parseError = ref('')
 

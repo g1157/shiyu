@@ -34,9 +34,17 @@ pub async fn translate_text(
             "你是英语词义助手。请基于句子语义推断单词在句中的含义。输出 JSON，词性必须为缩写：n., v., adj., adv., prep., conj., pron., det., interj.。释义需先中文后英文。英文释义必须是清晰完整的英英解释（不少于8个英文单词），可以使用“related to”但必须把意思解释清楚；不要加“in this context/The term ... describes”这类多余前缀，直接给定义。只输出 JSON：{\"pos\":\"词性缩写\",\"zh\":\"中文释义\",\"en\":\"英文释义(完整句子)\"}",
             200,
         ),
+        "word_quick" => (
+            "你是英语阅读场景下的快速查词助手。用户会提供单词和可选语境。请只输出 JSON：{\"pos\":\"词性缩写\",\"meaning\":\"结合语境的简洁中文释义\"}。要求：1. pos 使用 n./v./adj./adv./prep./conj./pron./det./interj. 这类缩写；2. meaning 只写当前语境下最贴切的中文义项，不超过18个汉字；3. 不要英文，不要例句，不要额外解释。",
+            120,
+        ),
         "sentence" => (
             "你是一个英语学习助手。用户会给你一个英文句子，请翻译成中文，并简要解释句子结构。",
             300,
+        ),
+        "sentence_quick" => (
+            "你是英语阅读场景下的快速句子助手。用户会给你一个英文句子。请只输出 JSON：{\"translation\":\"自然流畅的中文翻译\"}。要求：1. 只保留一句中文译文；2. 不要分析句法，不要补充说明；3. 译文要适合阅读时快速扫读。",
+            180,
         ),
         "complex_sentence" => (
             "你是英语长难句解析助手。请分析句子结构（主干、从句、修饰成分）并给出信达雅的中文释义。结构分析中引用原文时不要全文，只保留开头和结尾，用 ... 连接，便于定位。请输出 JSON，格式为 {\"summary\":\"一句话结构总述\",\"analysis\":\"结构分解\",\"translation\":\"中文释义\"}。summary 用一句话串起主干/从句/修饰关系。analysis 用简洁的文字列出各成分，不需要换行。只输出 JSON。",
@@ -214,7 +222,10 @@ pub async fn translate_article_stream(
     // Translate title if provided (index = -2)
     if let Some(ref title) = req.title {
         if !title.trim().is_empty() {
-            let _ = app.emit("translation-chunk", json!({ "index": -2, "text": "", "done": false, "started": true }));
+            let _ = app.emit(
+                "translation-chunk",
+                json!({ "index": -2, "text": "", "done": false, "started": true }),
+            );
 
             let title_response = client
                 .post(&api_url)
@@ -245,9 +256,15 @@ pub async fn translate_article_stream(
                                 buffer = buffer[line_end + 1..].to_string();
                                 if line.starts_with("data: ") {
                                     let data = &line[6..];
-                                    if data == "[DONE]" { break; }
-                                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                                        if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
+                                    if data == "[DONE]" {
+                                        break;
+                                    }
+                                    if let Ok(parsed) =
+                                        serde_json::from_str::<serde_json::Value>(data)
+                                    {
+                                        if let Some(content) =
+                                            parsed["choices"][0]["delta"]["content"].as_str()
+                                        {
                                             if !content.is_empty() {
                                                 let _ = app.emit("translation-chunk", json!({ "index": -2, "text": content, "done": false }));
                                             }
@@ -259,7 +276,10 @@ pub async fn translate_article_stream(
                     }
                 }
             }
-            let _ = app.emit("translation-chunk", json!({ "index": -2, "text": "", "done": true }));
+            let _ = app.emit(
+                "translation-chunk",
+                json!({ "index": -2, "text": "", "done": true }),
+            );
         }
     }
 
@@ -272,7 +292,10 @@ pub async fn translate_article_stream(
 
         let index = para.index;
 
-        let _ = app.emit("translation-chunk", json!({ "index": index, "text": "", "done": false, "started": true }));
+        let _ = app.emit(
+            "translation-chunk",
+            json!({ "index": index, "text": "", "done": false, "started": true }),
+        );
 
         let response = client
             .post(&api_url)
@@ -312,11 +335,16 @@ pub async fn translate_article_stream(
 
                 if line.starts_with("data: ") {
                     let data = &line[6..];
-                    if data == "[DONE]" { break; }
+                    if data == "[DONE]" {
+                        break;
+                    }
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
                         if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
                             if !content.is_empty() {
-                                let _ = app.emit("translation-chunk", json!({ "index": index, "text": content, "done": false }));
+                                let _ = app.emit(
+                                    "translation-chunk",
+                                    json!({ "index": index, "text": content, "done": false }),
+                                );
                             }
                         }
                     }
@@ -324,7 +352,10 @@ pub async fn translate_article_stream(
             }
         }
 
-        let _ = app.emit("translation-chunk", json!({ "index": index, "text": "", "done": true }));
+        let _ = app.emit(
+            "translation-chunk",
+            json!({ "index": index, "text": "", "done": true }),
+        );
     }
 
     // Signal all done

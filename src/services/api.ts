@@ -163,7 +163,14 @@ export async function importConfigPack(filePath: string): Promise<number> {
 
 export interface TranslateRequest {
     text: string
-    prompt_type: 'word' | 'sentence' | 'complex_sentence' | 'sentence_structure' | 'mindmap'
+    prompt_type:
+        | 'word'
+        | 'word_quick'
+        | 'sentence'
+        | 'sentence_quick'
+        | 'complex_sentence'
+        | 'sentence_structure'
+        | 'mindmap'
 }
 
 export async function translateText(req: TranslateRequest): Promise<{ result: string }> {

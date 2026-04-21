@@ -15,6 +15,7 @@ import type { HighlightType } from '../composables/useRouteQuery'
 import SelectionPopover from './SelectionPopover.vue'
 import AnnotationForm from './AnnotationForm.vue'
 import AnnotationTooltip from './AnnotationTooltip.vue'
+import QuickLookupPanel from './QuickLookupPanel.vue'
 import Toast from './Toast.vue'
 // ⚠️ CSS 导入顺序固定：annotation-highlight 必须最后加载
 import '../styles/reader-typography.css'
@@ -103,11 +104,31 @@ const {
   annotationType,
   cachedSelectedText,
   cachedContextText,
+  annotationDraft,
   tooltipState,
+  quickLookupVisible,
+  quickLookupType,
+  quickLookupSelectedText,
+  quickLookupContextText,
+  quickLookupWordPos,
+  quickLookupMeaning,
+  quickLookupTranslation,
+  quickLookupParsedHtml,
+  quickLookupStructureNote,
+  quickLookupLoading,
+  quickLookupDeepLoading,
+  quickLookupSaving,
+  quickLookupError,
+  quickLookupDeepError,
   handleAddWord,
   handleAddSentence,
   handleCloseForm,
   handleSaveAnnotation,
+  closeQuickLookup,
+  retryQuickLookup,
+  requestSentenceDeepAnalysis,
+  openQuickLookupEditor,
+  saveQuickLookup,
   toggleAnnotations,
   handleAnnotationClick,
   handleHighlightHover,
@@ -500,6 +521,10 @@ watch(() => props.highlightId, (newId) => {
       :type="annotationType"
       :selected-text="cachedSelectedText"
       :context-text="cachedContextText"
+      :initial-meaning="annotationDraft.meaning"
+      :initial-sentence-translation="annotationDraft.sentenceTranslation"
+      :initial-structure-parsed="annotationDraft.structureParsed"
+      :initial-structure-note="annotationDraft.structureNote"
       @save="handleSaveAnnotation"
       @cancel="handleCloseForm"
     />
@@ -510,6 +535,28 @@ watch(() => props.highlightId, (newId) => {
       :type="tooltipState.type"
       :position="tooltipState.position"
       @close="handleTooltipClose"
+    />
+
+    <QuickLookupPanel
+      :visible="quickLookupVisible"
+      :type="quickLookupType"
+      :selected-text="quickLookupSelectedText"
+      :context-text="quickLookupContextText"
+      :loading="quickLookupLoading"
+      :deep-loading="quickLookupDeepLoading"
+      :saving="quickLookupSaving"
+      :error="quickLookupError"
+      :deep-error="quickLookupDeepError"
+      :word-pos="quickLookupWordPos"
+      :meaning="quickLookupMeaning"
+      :translation="quickLookupTranslation"
+      :parsed-html="quickLookupParsedHtml"
+      :structure-note="quickLookupStructureNote"
+      @close="closeQuickLookup"
+      @retry="retryQuickLookup"
+      @deepen="requestSentenceDeepAnalysis"
+      @edit="openQuickLookupEditor"
+      @save="saveQuickLookup"
     />
 
 
