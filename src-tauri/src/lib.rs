@@ -9,7 +9,7 @@ use commands::articles::{
     save_article_mindmap, update_article,
 };
 use commands::config_pack::import_config_pack;
-use commands::data::{export_all_data, import_data};
+use commands::data::{export_all_data, export_data_to_file, import_data, import_data_from_file};
 use commands::ebooks::{
     delete_ebook, get_ebook, get_ebooks, import_epub_as_book, update_ebook_progress,
 };
@@ -67,7 +67,9 @@ pub fn run() {
             test_api_connection,
             // Data
             export_all_data,
+            export_data_to_file,
             import_data,
+            import_data_from_file,
             // Articles
             get_articles,
             get_article,

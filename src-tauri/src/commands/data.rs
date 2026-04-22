@@ -122,10 +122,7 @@ fn ebook_exists(tx: &rusqlite::Transaction<'_>, item: &ExportEbookItem) -> Resul
     Ok(exists != 0)
 }
 
-#[tauri::command]
-pub fn export_all_data(db: State<Database>) -> Result<ExportData, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
+fn collect_export_data(conn: &rusqlite::Connection) -> Result<ExportData, String> {
     // Export vocabulary
     let mut stmt = conn
         .prepare("SELECT id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href, review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty, srs_state, srs_lapses, srs_reps, srs_last_review FROM vocabulary")
@@ -295,10 +292,11 @@ pub fn export_all_data(db: State<Database>) -> Result<ExportData, String> {
     })
 }
 
-#[tauri::command]
-pub fn import_data(db: State<Database>, data: ExportData, mode: String) -> Result<String, String> {
-    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
-
+fn apply_import_data(
+    conn: &mut rusqlite::Connection,
+    data: ExportData,
+    mode: &str,
+) -> Result<String, String> {
     // 使用事务确保数据一致性
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -419,4 +417,41 @@ pub fn import_data(db: State<Database>, data: ExportData, mode: String) -> Resul
         ebook_count,
         data.assets.len()
     ))
+}
+
+#[tauri::command]
+pub fn export_all_data(db: State<Database>) -> Result<ExportData, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    collect_export_data(&conn)
+}
+
+#[tauri::command]
+pub fn export_data_to_file(db: State<Database>, file_path: String) -> Result<String, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let data = collect_export_data(&conn)?;
+    let json =
+        serde_json::to_string_pretty(&data).map_err(|e| format!("序列化备份数据失败: {}", e))?;
+
+    fs::write(&file_path, json).map_err(|e| format!("写入备份文件失败: {}", e))?;
+    Ok(file_path)
+}
+
+#[tauri::command]
+pub fn import_data(db: State<Database>, data: ExportData, mode: String) -> Result<String, String> {
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    apply_import_data(&mut conn, data, &mode)
+}
+
+#[tauri::command]
+pub fn import_data_from_file(
+    db: State<Database>,
+    file_path: String,
+    mode: String,
+) -> Result<String, String> {
+    let content = fs::read_to_string(&file_path).map_err(|e| format!("读取备份文件失败: {}", e))?;
+    let data: ExportData =
+        serde_json::from_str(&content).map_err(|e| format!("解析备份文件失败: {}", e))?;
+
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    apply_import_data(&mut conn, data, &mode)
 }

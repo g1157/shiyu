@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { save, open } from '@tauri-apps/plugin-dialog'
-import { exportAllData, importData, type ExportData } from '../services/api'
-import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs'
+import { exportDataToFile, importDataFromFile } from '../services/api'
 
 const exporting = ref(false)
 const importing = ref(false)
@@ -13,17 +12,15 @@ async function handleExport() {
   exporting.value = true
   message.value = ''
   try {
-    const data = await exportAllData()
-    const json = JSON.stringify(data, null, 2)
-
     const filePath = await save({
       defaultPath: `shiyu-backup-${new Date().toISOString().slice(0, 10)}.json`,
       filters: [{ name: 'JSON', extensions: ['json'] }],
     })
 
     if (filePath) {
-      await writeTextFile(filePath, json)
-      message.value = `✅ 数据已导出到 ${filePath}`
+      const normalizedPath = filePath.endsWith('.json') ? filePath : `${filePath}.json`
+      const savedPath = await exportDataToFile(normalizedPath)
+      message.value = `✅ 数据已导出到 ${savedPath}`
       messageType.value = 'success'
     }
   } catch (e: any) {
@@ -44,9 +41,7 @@ async function handleImport(mode: string) {
     })
 
     if (filePath) {
-      const content = await readTextFile(filePath as string)
-      const data: ExportData = JSON.parse(content)
-      const result = await importData(data, mode)
+      const result = await importDataFromFile(filePath as string, mode)
       message.value = `✅ ${result}`
       messageType.value = 'success'
     }

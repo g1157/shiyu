@@ -225,8 +225,16 @@ export async function exportAllData(): Promise<ExportData> {
     return invoke('export_all_data')
 }
 
+export async function exportDataToFile(filePath: string): Promise<string> {
+    return invoke('export_data_to_file', { filePath })
+}
+
 export async function importData(data: ExportData, mode: string): Promise<string> {
     return invoke('import_data', { data, mode })
+}
+
+export async function importDataFromFile(filePath: string, mode: string): Promise<string> {
+    return invoke('import_data_from_file', { filePath, mode })
 }
 
 // ── Ebooks ──────────────────────────────────────────────
