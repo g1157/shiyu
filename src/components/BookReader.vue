@@ -1893,13 +1893,14 @@ async function initReader() {
     const initialTocHref = resolveInitialTocHref()
     const initialTarget = props.focusCfi || currentEbook.value.cfi_position || initialTocHref || undefined
 
+    // Reader behaviors come from our own hooks; keep untrusted EPUB scripts disabled.
     rendition = bookInstance.renderTo(readerHostRef.value, {
       manager: 'default',
       width: '100%',
       height: '100%',
       flow: 'scrolled-doc',
       spread: 'none',
-      allowScriptedContent: true,
+      allowScriptedContent: false,
     })
 
     applyReaderTheme()
