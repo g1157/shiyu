@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { defineAsyncComponent, ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { deleteArticle, type ArticleItem } from '../services/api'
 import { clearTranslationCache } from '../composables/useTranslation'
@@ -7,9 +7,10 @@ import { useRouteQuery, type HighlightType } from '../composables/useRouteQuery'
 import { useAppStore } from '../stores/appStore'
 import { useGlobalToast } from '../composables/useGlobalToast'
 
-import ArticleReader from '../components/ArticleReader.vue'
 import ArticleListPanel from '../components/ArticleListPanel.vue'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.vue'
+
+const ArticleReader = defineAsyncComponent(() => import('../components/ArticleReader.vue'))
 
 const route = useRoute()
 const { getQueryValue, normalizeHighlightType, clearNavigationQuery } = useRouteQuery()

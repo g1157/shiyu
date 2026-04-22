@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useRoute, useRouter } from 'vue-router'
 import { deleteEbook, getEbooks, importEpubAsBook, type EbookItem } from '../services/api'
-import BookReader from '../components/BookReader.vue'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.vue'
 import { useGlobalToast } from '../composables/useGlobalToast'
 import type { HighlightType } from '../composables/useRouteQuery'
 import { formatDate } from '../utils/format'
+
+const BookReader = defineAsyncComponent(() => import('../components/BookReader.vue'))
 
 const route = useRoute()
 const router = useRouter()

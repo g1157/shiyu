@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
+import { defineAsyncComponent, ref, computed, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getArticle, type ArticleItem } from '../services/api'
-import ContentEditorModal from './ContentEditorModal.vue'
-import MindMapPanel from './MindMapPanel.vue'
-import ArticleWordList from './ArticleWordList.vue'
 import { useSettingsStore } from '../stores/settingsStore'
 import { marked } from 'marked'
 import { useTextSelection } from '../composables/useTextSelection'
@@ -28,6 +25,10 @@ import Toast from './Toast.vue'
 import '../styles/reader-typography.css'
 import '../styles/article-reader.css'
 import '../styles/annotation-highlight.css'
+
+const ContentEditorModal = defineAsyncComponent(() => import('./ContentEditorModal.vue'))
+const MindMapPanel = defineAsyncComponent(() => import('./MindMapPanel.vue'))
+const ArticleWordList = defineAsyncComponent(() => import('./ArticleWordList.vue'))
 
 marked.setOptions({ gfm: true, breaks: true })
 
