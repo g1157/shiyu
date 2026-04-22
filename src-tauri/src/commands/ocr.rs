@@ -1,5 +1,6 @@
 // OCR 图片识别（PP-StructureV3 + DeepSeek 校正）
 use crate::db::Database;
+use crate::secure_settings::get_setting_value;
 use base64::Engine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -79,17 +80,10 @@ fn ocr_images_dir() -> PathBuf {
 fn get_ocr_settings(db: &Database) -> Result<(String, String), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-    let get_val = |key: &str| -> Option<String> {
-        conn.prepare("SELECT value FROM settings WHERE key = ?1")
-            .ok()?
-            .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
-            .ok()
-    };
-
-    let api_url = get_val("ocr_api_url")
+    let api_url = get_setting_value(&conn, "ocr_api_url")?
         .filter(|s| !s.is_empty())
         .ok_or("OCR API URL 未配置，请先在设置中配置")?;
-    let token = get_val("ocr_api_token")
+    let token = get_setting_value(&conn, "ocr_api_token")?
         .filter(|s| !s.is_empty())
         .ok_or("OCR Token 未配置，请先在设置中配置")?;
 
@@ -100,17 +94,11 @@ fn get_ocr_settings(db: &Database) -> Result<(String, String), String> {
 fn get_ai_settings(db: &Database) -> Result<(String, String, String), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-    let get_val = |key: &str| -> Option<String> {
-        conn.prepare("SELECT value FROM settings WHERE key = ?1")
-            .ok()?
-            .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
-            .ok()
-    };
-
-    let api_key = get_val("api_key").ok_or("DeepSeek API Key 未配置")?;
-    let api_url = get_val("api_url")
+    let api_key = get_setting_value(&conn, "api_key")?.ok_or("DeepSeek API Key 未配置")?;
+    let api_url = get_setting_value(&conn, "api_url")?
         .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
-    let model = get_val("api_model").unwrap_or_else(|| "deepseek-chat".to_string());
+    let model =
+        get_setting_value(&conn, "api_model")?.unwrap_or_else(|| "deepseek-chat".to_string());
 
     Ok((api_key, api_url, model))
 }

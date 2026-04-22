@@ -1,5 +1,6 @@
 // 配置包导入命令 — 读取 .shiyu-config JSON 文件并写入 settings 表
 use crate::db::Database;
+use crate::secure_settings::set_setting_value;
 use serde::Deserialize;
 use tauri::State;
 
@@ -50,11 +51,8 @@ pub fn import_config_pack(db: State<Database>, file_path: String) -> Result<u32,
     for (key, value) in items {
         if let Some(val) = value {
             if !val.is_empty() {
-                conn.execute(
-                    "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
-                    rusqlite::params![key, val],
-                )
-                .map_err(|e| format!("写入设置失败 ({}): {}", key, e))?;
+                set_setting_value(&conn, key, val)
+                    .map_err(|e| format!("写入设置失败 ({}): {}", key, e))?;
                 count += 1;
             }
         }

@@ -1,60 +1,30 @@
 use crate::db::Database;
-use crate::models::SettingItem;
+use crate::secure_settings::{
+    delete_setting_value, get_all_settings as load_all_settings, get_setting_value,
+    set_setting_value,
+};
 use tauri::State;
 
 #[tauri::command]
 pub fn get_setting(db: State<Database>, key: String) -> Result<Option<String>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT value FROM settings WHERE key = ?1")
-        .map_err(|e| e.to_string())?;
-
-    let result = stmt
-        .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
-        .ok();
-
-    Ok(result)
+    get_setting_value(&conn, &key)
 }
 
 #[tauri::command]
 pub fn set_setting(db: State<Database>, key: String, value: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
-        rusqlite::params![key, value],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    set_setting_value(&conn, &key, &value)
 }
 
 #[tauri::command]
-pub fn get_all_settings(db: State<Database>) -> Result<Vec<SettingItem>, String> {
+pub fn get_all_settings(db: State<Database>) -> Result<Vec<crate::models::SettingItem>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT key, value FROM settings ORDER BY key")
-        .map_err(|e| e.to_string())?;
-
-    let items = stmt
-        .query_map([], |row| {
-            Ok(SettingItem {
-                key: row.get(0)?,
-                value: row.get(1)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(items)
+    load_all_settings(&conn)
 }
 
 #[tauri::command]
 pub fn delete_setting(db: State<Database>, key: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM settings WHERE key = ?1",
-        rusqlite::params![key],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    delete_setting_value(&conn, &key)
 }

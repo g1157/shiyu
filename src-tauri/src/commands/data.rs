@@ -4,6 +4,7 @@ use crate::models::{
     ArticleItem, ExportAssetItem, ExportData, ExportEbookItem, SentenceItem, SettingItem,
     VocabularyItem,
 };
+use crate::secure_settings::delete_setting_value;
 use base64::Engine;
 use regex::Regex;
 use std::collections::BTreeSet;
@@ -303,6 +304,8 @@ fn apply_import_data(
     if mode == "replace" {
         tx.execute_batch("DELETE FROM vocabulary; DELETE FROM sentences; DELETE FROM settings; DELETE FROM articles; DELETE FROM ebooks;")
             .map_err(|e| e.to_string())?;
+        delete_setting_value(&tx, "api_key")?;
+        delete_setting_value(&tx, "ocr_api_token")?;
         clear_directory(&resolve_ebooks_dir()?)?;
         clear_directory(&resolve_images_dir()?)?;
     }

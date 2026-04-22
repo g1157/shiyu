@@ -1,6 +1,7 @@
 // AI 翻译 + 流式翻译 + 句子解析
 use crate::db::Database;
 use crate::models::{ArticleTranslateRequest, TranslateRequest, TranslateResponse};
+use crate::secure_settings::get_setting_value;
 use futures_util::StreamExt;
 use serde_json::json;
 use std::time::Duration;
@@ -14,16 +15,9 @@ fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
 }
 
-fn get_setting_value(conn: &rusqlite::Connection, key: &str) -> Option<String> {
-    conn.prepare("SELECT value FROM settings WHERE key = ?1")
-        .ok()?
-        .query_row(rusqlite::params![key], |row| row.get::<_, String>(0))
-        .ok()
-}
-
 fn read_setting(db: &Database, key: &str) -> Result<Option<String>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    Ok(get_setting_value(&conn, key))
+    get_setting_value(&conn, key)
 }
 
 fn extract_quick_sentence_text(raw: &str) -> String {
@@ -101,8 +95,8 @@ async fn translate_sentence_quick_with_google(
         .json()
         .await
         .map_err(|e| format!("Google 翻译响应解析失败: {}", e))?;
-    let translation = extract_google_translation(&body)
-        .ok_or("Google 翻译未返回可用译文".to_string())?;
+    let translation =
+        extract_google_translation(&body).ok_or("Google 翻译未返回可用译文".to_string())?;
 
     Ok(wrap_quick_sentence_translation(translation))
 }
@@ -189,15 +183,11 @@ pub async fn translate_text(
         return Ok(response);
     }
 
-    // Read API settings from DB
     let (api_key, api_url, model) = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
-        let key = get_setting_value(&conn, "api_key").ok_or("API Key 未配置，请先在设置中配置")?;
-        let url = get_setting_value(&conn, "api_url")
+        let key = read_setting(&db, "api_key")?.ok_or("API Key 未配置，请先在设置中配置")?;
+        let url = read_setting(&db, "api_url")?
             .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
-        let model =
-            get_setting_value(&conn, "api_model").unwrap_or_else(|| "deepseek-chat".to_string());
+        let model = read_setting(&db, "api_model")?.unwrap_or_else(|| "deepseek-chat".to_string());
 
         (key, url, model)
     };
@@ -319,13 +309,10 @@ pub async fn translate_text(
 #[tauri::command]
 pub async fn test_api_connection(db: State<'_, Database>) -> Result<String, String> {
     let (api_key, api_url, model) = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
-        let key = get_setting_value(&conn, "api_key").ok_or("API Key 未配置")?;
-        let url = get_setting_value(&conn, "api_url")
+        let key = read_setting(&db, "api_key")?.ok_or("API Key 未配置")?;
+        let url = read_setting(&db, "api_url")?
             .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
-        let model =
-            get_setting_value(&conn, "api_model").unwrap_or_else(|| "deepseek-chat".to_string());
+        let model = read_setting(&db, "api_model")?.unwrap_or_else(|| "deepseek-chat".to_string());
 
         (key, url, model)
     };
@@ -355,14 +342,12 @@ pub async fn test_api_connection(db: State<'_, Database>) -> Result<String, Stri
     }
 }
 
-/// Helper: read API settings from DB
+/// Helper: read API settings from persistent settings storage
 fn read_api_settings(db: &Database) -> Result<(String, String, String), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
-    let key = get_setting_value(&conn, "api_key").ok_or("API Key 未配置，请先在设置中配置")?;
-    let url = get_setting_value(&conn, "api_url")
+    let key = read_setting(db, "api_key")?.ok_or("API Key 未配置，请先在设置中配置")?;
+    let url = read_setting(db, "api_url")?
         .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
-    let model = get_setting_value(&conn, "api_model").unwrap_or_else(|| "deepseek-chat".to_string());
+    let model = read_setting(db, "api_model")?.unwrap_or_else(|| "deepseek-chat".to_string());
 
     Ok((key, url, model))
 }

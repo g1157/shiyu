@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod models;
 mod repositories;
+mod secure_settings;
 
 use commands::ai::{test_api_connection, translate_article_stream, translate_text};
 use commands::articles::{
@@ -22,8 +23,8 @@ use commands::sentences::{
 use commands::settings::{delete_setting, get_all_settings, get_setting, set_setting};
 use commands::vocabulary::{
     add_vocabulary, delete_vocabulary, get_due_vocabulary, get_vocabulary,
-    get_vocabulary_by_article, get_vocabulary_by_ebook, get_vocabulary_grouped, update_vocabulary_review,
-    update_vocabulary_srs,
+    get_vocabulary_by_article, get_vocabulary_by_ebook, get_vocabulary_grouped,
+    update_vocabulary_review, update_vocabulary_srs,
 };
 use db::Database;
 
