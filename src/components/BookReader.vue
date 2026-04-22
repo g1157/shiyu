@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import ePub from 'epubjs'
@@ -85,6 +85,60 @@ const toast = useGlobalToast()
 const appStore = useAppStore()
 const settingsStore = useSettingsStore()
 const TOC_PANEL_STORAGE_KEY = 'shiyu:book-reader:toc-visible:v2'
+type ReaderFontSize = 'small' | 'medium' | 'large'
+type ReaderWidth = 'narrow' | 'medium' | 'wide'
+type ReaderDensity = 'compact' | 'balanced' | 'relaxed'
+
+// Shared with ArticleReader so article/book reading stays visually consistent.
+const READER_FONT_SETTING_KEY = 'article_reader_font_size'
+const READER_WIDTH_SETTING_KEY = 'article_reader_width'
+const READER_DENSITY_SETTING_KEY = 'article_reader_density'
+
+const bookReaderFontSizeMap = {
+  small: '1.02rem',
+  medium: '1.13rem',
+  large: '1.25rem',
+}
+
+const bookReaderFontSizeLabel = {
+  small: '小',
+  medium: '中',
+  large: '大',
+}
+
+const bookReaderWidthMap = {
+  narrow: '680px',
+  medium: '760px',
+  wide: '860px',
+}
+
+const bookReaderWidthLabel = {
+  narrow: '窄栏',
+  medium: '标准',
+  wide: '宽栏',
+}
+
+const bookReaderDensityLineHeightMap = {
+  compact: '1.82',
+  balanced: '1.98',
+  relaxed: '2.12',
+}
+
+const bookReaderDensityImageWidthMap = {
+  compact: '68%',
+  balanced: '75%',
+  relaxed: '82%',
+}
+
+const bookReaderDensityLabel = {
+  compact: '紧凑',
+  balanced: '均衡',
+  relaxed: '舒展',
+}
+
+const BOOK_TOOLBAR_SCROLL_THRESHOLD = 96
+
+const readerShellRef = ref<HTMLElement | null>(null)
 const readerHostRef = ref<HTMLElement | null>(null)
 const currentEbook = ref<EbookItem | null>(null)
 const loading = ref(true)
@@ -94,6 +148,10 @@ const expandedTocKeys = ref<Record<string, boolean>>({})
 const showToc = ref(readStoredTocVisibility())
 const currentChapter = ref('')
 const annotationEnabled = ref(true)
+const fontSize = ref<ReaderFontSize>('medium')
+const readerWidth = ref<ReaderWidth>('medium')
+const readerDensity = ref<ReaderDensity>('balanced')
+const showTopToolbar = ref(false)
 const vocabulary = ref<VocabularyItem[]>([])
 const sentences = ref<SentenceItem[]>([])
 const toastRef = ref<{ show: (message: string) => void } | null>({
@@ -188,6 +246,11 @@ const progressPercent = computed(() =>
   Math.round(((currentEbook.value?.progress || 0) * 1000)) / 10
 )
 const currentTheme = computed<'light' | 'dark'>(() => (settingsStore.theme === 'dark' ? 'dark' : 'light'))
+const readerShellStyle = computed(() => ({
+  '--book-reader-host-width': bookReaderWidthMap[readerWidth.value],
+}))
+const readerToolbarTitle = computed(() => currentEbook.value?.title || props.ebook.title)
+const readerToolbarSubtitle = computed(() => currentChapter.value || '正在加载章节')
 
 const BOOK_READER_THEME_NAME = 'app-book-theme'
 const registeredReaderThemes = new Set<string>()
@@ -273,7 +336,7 @@ function getBookReaderPalette(mode: 'light' | 'dark') {
 }
 
 function getBookReaderThemeName(mode: 'light' | 'dark') {
-  return `${BOOK_READER_THEME_NAME}-${mode}`
+  return `${BOOK_READER_THEME_NAME}-${mode}-${fontSize.value}-${readerDensity.value}`
 }
 
 function buildBookReaderInlineOverrideCss(mode: 'light' | 'dark') {
@@ -340,6 +403,9 @@ body a [style*="color"] {
 
 function buildBookReaderThemeCss(mode: 'light' | 'dark') {
   const palette = getBookReaderPalette(mode)
+  const bodyFontSize = bookReaderFontSizeMap[fontSize.value]
+  const bodyLineHeight = bookReaderDensityLineHeightMap[readerDensity.value]
+  const imageMaxWidth = bookReaderDensityImageWidthMap[readerDensity.value]
 
   return String.raw`
 :root {
@@ -363,8 +429,8 @@ body {
   color: var(--c-text) !important;
   background: var(--c-bg-light) !important;
   font-family: var(--font-serif) !important;
-  font-size: 1.13rem !important;
-  line-height: 1.98 !important;
+  font-size: ${bodyFontSize} !important;
+  line-height: ${bodyLineHeight} !important;
   font-weight: 400 !important;
   letter-spacing: 0.006em;
   word-wrap: break-word;
@@ -442,7 +508,7 @@ body h6 {
 
 body img {
   display: block !important;
-  max-width: 75% !important;
+  max-width: min(100%, ${imageMaxWidth}) !important;
   max-height: 500px !important;
   height: auto !important;
   margin: 1.5rem auto !important;
@@ -1203,6 +1269,12 @@ function attachContentInteraction(contents: any) {
     if (quickLookupVisible.value) {
       scheduleQuickLookupPanelPositionUpdate()
     }
+    updateToolbarVisibility()
+  }
+  const onWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey) return
+    event.preventDefault()
+    adjustFontSize(event.deltaY < 0 ? 1 : -1)
   }
   const onPointerMove = (event: MouseEvent) => {
     const frameElement = contents?.document?.defaultView?.frameElement as HTMLElement | null
@@ -1256,6 +1328,7 @@ function attachContentInteraction(contents: any) {
   contents.document.addEventListener('mouseleave', onPointerLeave)
   contents.window?.addEventListener?.('scroll', onViewportChange, { passive: true })
   contents.window?.addEventListener?.('resize', onViewportChange)
+  contents.document.addEventListener('wheel', onWheel, { passive: false })
 
   contentCleanupFns.push(() => {
     try {
@@ -1267,6 +1340,7 @@ function attachContentInteraction(contents: any) {
       contents.document.removeEventListener('mouseleave', onPointerLeave)
       contents.window?.removeEventListener?.('scroll', onViewportChange)
       contents.window?.removeEventListener?.('resize', onViewportChange)
+      contents.document.removeEventListener('wheel', onWheel)
     } catch {}
   })
 }
@@ -1292,6 +1366,11 @@ function flattenToc(nodes: TocNode[]): TocNode[] {
   return nodes.flatMap((node) => [node, ...flattenToc(node.subitems)])
 }
 
+function resolveInitialTocHref(): string | null {
+  const first = flattenToc(toc.value).find((node) => normalizeHref(node.href))
+  return first?.href || null
+}
+
 function resolveChapterLabel(href?: string): string {
   const target = normalizeHref(href)
   if (!target) return ''
@@ -1310,6 +1389,24 @@ function currentLocationHref() {
     return location.start.href as string
   }
   return null
+}
+
+function hasMeaningfulRenderedText(): boolean {
+  for (const contents of getRenderedContents()) {
+    const body = contents?.document?.body as HTMLElement | null | undefined
+    if (!body) continue
+
+    if (body.querySelector('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, table')) {
+      return true
+    }
+
+    const compactText = (body.textContent || '').replace(/\s+/g, '')
+    if (compactText.length >= 24) {
+      return true
+    }
+  }
+
+  return false
 }
 
 function resolveBookProgress(location: any): number | null {
@@ -1362,6 +1459,8 @@ function applyReaderTheme() {
   const mode = currentTheme.value
   const themeName = getBookReaderThemeName(mode)
   const palette = getBookReaderPalette(mode)
+  const bodyFontSize = bookReaderFontSizeMap[fontSize.value]
+  const bodyLineHeight = bookReaderDensityLineHeightMap[readerDensity.value]
 
   if (!registeredReaderThemes.has(themeName)) {
     rendition.themes.registerCss(themeName, buildBookReaderThemeCss(mode))
@@ -1371,9 +1470,116 @@ function applyReaderTheme() {
   rendition.themes.select(themeName)
   rendition.themes.override('color', palette.text, true)
   rendition.themes.override('background', palette.bgLight, true)
-  rendition.themes.override('font-size', '1.13rem', true)
-  rendition.themes.override('line-height', '1.98', true)
+  rendition.themes.override('font-size', bodyFontSize, true)
+  rendition.themes.override('line-height', bodyLineHeight, true)
   rendition.themes.font("'Georgia', 'Times New Roman', serif")
+}
+
+function syncRenderedReaderTheme() {
+  if (!rendition) return
+  applyReaderTheme()
+  for (const contents of getRenderedContents()) {
+    applyInlineThemeOverride(contents)
+  }
+}
+
+async function finalizeDisplayedContent() {
+  await nextTick()
+  syncRenderedReaderTheme()
+}
+
+function cycleFontSize() {
+  const sizes: ReaderFontSize[] = ['small', 'medium', 'large']
+  const idx = sizes.indexOf(fontSize.value)
+  setFontSize(sizes[(idx + 1) % sizes.length])
+}
+
+function setFontSize(next: ReaderFontSize) {
+  if (fontSize.value === next) return
+  fontSize.value = next
+  void persistReaderPreference(READER_FONT_SETTING_KEY, fontSize.value)
+}
+
+function adjustFontSize(step: 1 | -1) {
+  const sizes: ReaderFontSize[] = ['small', 'medium', 'large']
+  const idx = sizes.indexOf(fontSize.value)
+  const nextIdx = Math.max(0, Math.min(sizes.length - 1, idx + step))
+  if (nextIdx === idx) return
+  setFontSize(sizes[nextIdx])
+}
+
+function cycleReaderWidth() {
+  const widths: ReaderWidth[] = ['narrow', 'medium', 'wide']
+  const idx = widths.indexOf(readerWidth.value)
+  readerWidth.value = widths[(idx + 1) % widths.length]
+  void persistReaderPreference(READER_WIDTH_SETTING_KEY, readerWidth.value)
+}
+
+function cycleReaderDensity() {
+  const densities: ReaderDensity[] = ['compact', 'balanced', 'relaxed']
+  const idx = densities.indexOf(readerDensity.value)
+  readerDensity.value = densities[(idx + 1) % densities.length]
+  void persistReaderPreference(READER_DENSITY_SETTING_KEY, readerDensity.value)
+}
+
+function isReaderFontSize(value: string | null): value is ReaderFontSize {
+  return value === 'small' || value === 'medium' || value === 'large'
+}
+
+function isReaderWidth(value: string | null): value is ReaderWidth {
+  return value === 'narrow' || value === 'medium' || value === 'wide'
+}
+
+function isReaderDensity(value: string | null): value is ReaderDensity {
+  return value === 'compact' || value === 'balanced' || value === 'relaxed'
+}
+
+function applyStoredReaderPreferences() {
+  const savedFontSize = settingsStore.getSettingImmediate(READER_FONT_SETTING_KEY)
+  const savedWidth = settingsStore.getSettingImmediate(READER_WIDTH_SETTING_KEY)
+  const savedDensity = settingsStore.getSettingImmediate(READER_DENSITY_SETTING_KEY)
+
+  if (isReaderFontSize(savedFontSize)) {
+    fontSize.value = savedFontSize
+  }
+
+  if (isReaderWidth(savedWidth)) {
+    readerWidth.value = savedWidth
+  }
+
+  if (isReaderDensity(savedDensity)) {
+    readerDensity.value = savedDensity
+  }
+}
+
+async function persistReaderPreference(key: string, value: string) {
+  try {
+    await settingsStore.setSetting(key, value)
+  } catch (error) {
+    console.error(`保存阅读器偏好失败: ${key}`, error)
+  }
+}
+
+function updateToolbarVisibility() {
+  const contentScrollTops = getRenderedContents()
+    .map((contents) => {
+      const doc = contents?.document
+      if (!doc) return 0
+      return Math.max(
+        doc.documentElement?.scrollTop || 0,
+        doc.body?.scrollTop || 0,
+        contents?.window?.scrollY || 0,
+      )
+    })
+
+  const maxScrollTop = contentScrollTops.length ? Math.max(...contentScrollTops) : getShellScrollContainer().scrollTop
+  showTopToolbar.value = maxScrollTop > BOOK_TOOLBAR_SCROLL_THRESHOLD
+}
+
+function handleReaderWheel(event: WheelEvent) {
+  if (!event.ctrlKey) return
+  event.preventDefault()
+  adjustFontSize(event.deltaY < 0 ? 1 : -1)
 }
 
 function syncBookUpdate(updated: EbookItem) {
@@ -1603,6 +1809,7 @@ function handleRelocated(location: any) {
     queueProgressSave(currentEbook.value?.progress || 0, start.cfi)
   }
   scheduleQuickLookupPanelPositionUpdate()
+  updateToolbarVisibility()
 }
 
 function cleanupReader() {
@@ -1664,6 +1871,7 @@ async function initReader() {
 
   try {
     await settingsStore.loadSettings()
+    applyStoredReaderPreferences()
     const latest = await getEbook(props.ebook.id).catch(() => props.ebook)
     currentEbook.value = latest
     await loadBookAnnotations()
@@ -1682,6 +1890,8 @@ async function initReader() {
     toc.value = normalizeToc(navigation?.toc || [])
     expandedTocKeys.value = loadExpandedTocState(latest.id)
     currentChapter.value = toc.value[0]?.label || ''
+    const initialTocHref = resolveInitialTocHref()
+    const initialTarget = props.focusCfi || currentEbook.value.cfi_position || initialTocHref || undefined
 
     rendition = bookInstance.renderTo(readerHostRef.value, {
       manager: 'default',
@@ -1699,7 +1909,17 @@ async function initReader() {
     })
     rendition.on('relocated', handleRelocated)
     rendition.on('selected', handleSelected)
-    await rendition.display(props.focusCfi || currentEbook.value.cfi_position || undefined)
+    await rendition.display(initialTarget)
+    await finalizeDisplayedContent()
+
+    // Some EPUBs place cover / front-matter ahead of the actual TOC chapter.
+    // If first open lands on an effectively empty page, fall back to the first TOC entry.
+    if (!props.focusCfi && initialTocHref && initialTarget !== initialTocHref && !hasMeaningfulRenderedText()) {
+      await rendition.display(initialTocHref)
+      await finalizeDisplayedContent()
+    }
+
+    updateToolbarVisibility()
     void ensureBookLocationsGenerated()
     setActiveHighlight(props.highlightId, props.highlightType)
     syncBookAnnotations()
@@ -1717,6 +1937,7 @@ async function openChapter(item: TocNode) {
   removeInlineSentenceTranslation()
   clearSelection()
   await rendition.display(item.href || normalizeHref(item.href))
+  await finalizeDisplayedContent()
   currentChapter.value = item.label
 }
 
@@ -1734,13 +1955,25 @@ function nextPage() {
 
 onMounted(() => {
   void initReader()
+  readerShellRef.value?.addEventListener('wheel', handleReaderWheel, { passive: false })
   getShellScrollContainer().addEventListener('scroll', scheduleQuickLookupPanelPositionUpdate, { passive: true })
+  getShellScrollContainer().addEventListener('scroll', updateToolbarVisibility, { passive: true })
   window.addEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
+  window.addEventListener('resize', updateToolbarVisibility)
+})
+
+onActivated(() => {
+  syncRenderedReaderTheme()
+  scheduleQuickLookupPanelPositionUpdate()
+  updateToolbarVisibility()
 })
 
 onUnmounted(() => {
+  readerShellRef.value?.removeEventListener('wheel', handleReaderWheel)
   getShellScrollContainer().removeEventListener('scroll', scheduleQuickLookupPanelPositionUpdate)
+  getShellScrollContainer().removeEventListener('scroll', updateToolbarVisibility)
   window.removeEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
+  window.removeEventListener('resize', updateToolbarVisibility)
   shellScrollContainer = null
   cleanupReader()
 })
@@ -1773,11 +2006,12 @@ watch(
 
 watch(
   () => props.focusCfi,
-  (newCfi, oldCfi) => {
+  async (newCfi, oldCfi) => {
     if (!newCfi || newCfi === oldCfi || !rendition) return
     clearSelection()
     setActiveHighlight(props.highlightId, props.highlightType)
-    void rendition.display(newCfi)
+    await rendition.display(newCfi)
+    await finalizeDisplayedContent()
   },
 )
 
@@ -1803,30 +2037,56 @@ watch(showToc, async () => {
     rendition.resize?.(width, height)
   }
   scheduleQuickLookupPanelPositionUpdate()
+  updateToolbarVisibility()
 })
 
-watch(currentTheme, () => {
+watch([currentTheme, fontSize, readerDensity], () => {
   if (!rendition) return
-  applyReaderTheme()
-  for (const contents of getRenderedContents()) {
-    applyInlineThemeOverride(contents)
+  syncRenderedReaderTheme()
+  scheduleQuickLookupPanelPositionUpdate()
+})
+
+watch(readerWidth, async () => {
+  await nextTick()
+  if (!rendition || !readerHostRef.value) return
+  const width = readerHostRef.value.clientWidth
+  const height = readerHostRef.value.clientHeight
+  if (width > 0 && height > 0) {
+    rendition.resize?.(width, height)
   }
   scheduleQuickLookupPanelPositionUpdate()
+  updateToolbarVisibility()
 })
 </script>
 
 <template>
-  <section class="book-reader">
-    <div class="reader-toolbar glass-card">
-      <div class="reader-actions">
-        <button class="header-btn" @click="emit('close')">← 返回书架</button>
-        <button class="header-btn" @click="prevPage">上一页</button>
-        <button class="header-btn primary" @click="nextPage">下一页</button>
+  <section ref="readerShellRef" class="book-reader" :style="readerShellStyle">
+    <transition name="slide-down">
+      <div v-if="showTopToolbar" class="reader-toolbar glass-card">
+        <div class="reader-actions">
+          <button class="header-btn" @click="emit('close')">← 返回书架</button>
+          <button class="header-btn" @click="showToc = !showToc">{{ showToc ? '隐藏目录' : '显示目录' }}</button>
+          <button class="header-btn" @click="prevPage">上一页</button>
+          <button class="header-btn primary" @click="nextPage">下一页</button>
+        </div>
+        <div class="reader-toolbar-title">
+          <div class="reader-toolbar-title__main">{{ readerToolbarTitle }}</div>
+          <div class="reader-toolbar-title__sub">{{ readerToolbarSubtitle }}</div>
+        </div>
+        <div class="reader-toolbar-meta">
+          <button class="header-btn reader-display-btn" @click="cycleFontSize" :title="'字号: ' + bookReaderFontSizeLabel[fontSize]">
+            字号 {{ bookReaderFontSizeLabel[fontSize] }}
+          </button>
+          <button class="header-btn reader-display-btn" @click="cycleReaderWidth" :title="'正文宽度: ' + bookReaderWidthLabel[readerWidth]">
+            宽度 {{ bookReaderWidthLabel[readerWidth] }}
+          </button>
+          <button class="header-btn reader-display-btn" @click="cycleReaderDensity" :title="'正文比例: ' + bookReaderDensityLabel[readerDensity]">
+            比例 {{ bookReaderDensityLabel[readerDensity] }}
+          </button>
+          <span class="reader-progress-pill">{{ progressPercent }}%</span>
+        </div>
       </div>
-      <div class="reader-toolbar-meta">
-        <span>{{ progressPercent }}%</span>
-      </div>
-    </div>
+    </transition>
 
     <div class="reader-layout" :class="{ 'reader-layout--no-toc': !showToc }">
       <aside v-if="showToc" class="reader-toc glass-card">
@@ -1971,6 +2231,7 @@ watch(currentTheme, () => {
 
 <style scoped>
 .book-reader {
+  --book-reader-host-width: 760px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -1980,14 +2241,31 @@ watch(currentTheme, () => {
 
 .reader-toolbar {
   position: fixed;
-  top: 52px;
-  right: 28px;
-  z-index: 60;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 80;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  border-radius: 16px;
+  padding: 8px 20px;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: opacity 0.2s ease, transform 0.24s ease;
+}
+
+.slide-down-enter-from,
+.slide-down-leave-to {
+  opacity: 0;
+  transform: translateY(-12px);
 }
 
 .reader-title {
@@ -2012,7 +2290,42 @@ watch(currentTheme, () => {
   flex-wrap: wrap;
 }
 
+.reader-toolbar-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reader-toolbar-title__main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--c-text);
+}
+
+.reader-toolbar-title__sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: var(--c-text-lighter);
+}
+
 .reader-toolbar-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reader-progress-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2025,6 +2338,11 @@ watch(currentTheme, () => {
   color: var(--c-text-lighter);
   font-size: 0.88rem;
   font-weight: 700;
+}
+
+.reader-display-btn {
+  min-width: 92px;
+  justify-content: center;
 }
 
 .header-btn {
@@ -2098,7 +2416,7 @@ watch(currentTheme, () => {
 }
 
 .reader-layout--no-toc .reader-stage {
-  width: min(100%, 920px);
+  width: min(100%, calc(var(--book-reader-host-width) + 160px));
   margin: 0 auto;
 }
 
@@ -2265,7 +2583,7 @@ watch(currentTheme, () => {
 }
 
 .reader-host {
-  width: min(100%, 760px);
+  width: min(100%, var(--book-reader-host-width));
   height: calc(100vh - 104px);
   margin: 0 auto;
   border-radius: 14px;
@@ -2313,15 +2631,18 @@ watch(currentTheme, () => {
 
 @media (max-width: 960px) {
   .book-reader {
-    padding-top: 58px;
+    padding-top: 8px;
   }
 
   .reader-toolbar {
-    top: 44px;
-    right: 16px;
-    left: 16px;
+    padding: 8px 12px;
     justify-content: space-between;
     flex-wrap: wrap;
+  }
+
+  .reader-toolbar-title {
+    order: 3;
+    width: 100%;
   }
 
   .reader-layout {

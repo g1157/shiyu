@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
+import { sanitizeRichHtml } from '../utils/sanitizeHtml'
 import '../styles/reader-typography.css'
 
 marked.setOptions({ gfm: true, breaks: true })
@@ -63,7 +64,7 @@ onUnmounted(() => {
   scrollTarget?.removeEventListener('scroll', handleScroll)
 })
 
-const guideContent = computed(() => marked.parse(guideMd) as string)
+const guideContent = computed(() => sanitizeRichHtml(marked.parse(guideMd) as string))
 
 const guideMd = `
 <h2 id="quick-start">快速开始</h2>
@@ -97,6 +98,10 @@ const guideMd = `
 - **选中单词**：弹出悬浮菜单，后台快速查词，不打断阅读；结果回来后再决定保存或编辑
 - **选中句子**：弹出悬浮菜单，先给快速中文释义；需要时再点“深度解析”补句法结构
 - 所有标注会在文中高亮显示，方便回顾
+- 文章 / 图书阅读器工具栏可调 **字号 / 正文宽度 / 正文比例**，按内容类型切到更紧凑或更舒展的版式
+- 文章阅读器会根据正文标题自动生成 **侧边目录**
+- 图书阅读器会在向下阅读后进入沉浸模式，并将工具栏切换到顶部；回到顶部后退出沉浸模式
+- 在文章 / 图书阅读器中可使用 **Ctrl + 鼠标滚轮** 快速放大或缩小字号
 
 <h3 id="vocabulary">生词本</h3>
 

@@ -5,6 +5,7 @@ import { getArticle, type ArticleItem } from '../services/api'
 import ContentEditorModal from './ContentEditorModal.vue'
 import MindMapPanel from './MindMapPanel.vue'
 import ArticleWordList from './ArticleWordList.vue'
+import { useSettingsStore } from '../stores/settingsStore'
 import { marked } from 'marked'
 import { useTextSelection } from '../composables/useTextSelection'
 import { useAnnotation } from '../composables/useAnnotation'
@@ -16,6 +17,7 @@ import {
   isInlineSentenceTranslationBlock,
   resolveInlineSentenceAnchor,
 } from '../utils/inlineSentenceTranslation'
+import { sanitizeRichHtml } from '../utils/sanitizeHtml'
 
 import SelectionPopover from './SelectionPopover.vue'
 import AnnotationForm from './AnnotationForm.vue'
@@ -42,12 +44,32 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const settingsStore = useSettingsStore()
+
+type ReaderFontSize = 'small' | 'medium' | 'large'
+type ReaderWidth = 'narrow' | 'medium' | 'wide'
+type ReaderDensity = 'compact' | 'balanced' | 'relaxed'
+
+const READER_FONT_SETTING_KEY = 'article_reader_font_size'
+const READER_WIDTH_SETTING_KEY = 'article_reader_width'
+const READER_DENSITY_SETTING_KEY = 'article_reader_density'
+
+interface ArticleTocItem {
+  id: string
+  text: string
+  level: number
+}
 
 // Reader state
-const fontSize = ref<'small' | 'medium' | 'large'>('medium')
+const fontSize = ref<ReaderFontSize>('medium')
+const readerWidth = ref<ReaderWidth>('medium')
+const readerDensity = ref<ReaderDensity>('balanced')
 const readingProgress = ref(0)
 const showFloatingHeader = ref(false)
+const showArticleToc = ref(true)
+const activeTocId = ref<string | null>(null)
 
+const readerViewRef = ref<HTMLElement | null>(null)
 const readerBodyRef = ref<HTMLElement | null>(null)
 const currentArticle = ref<ArticleItem | null>(null)
 const currentArticleId = computed(() => currentArticle.value?.id || null)
@@ -206,13 +228,73 @@ const {
   cleanup: cleanupTranslation,
 } = useTranslation(readerBodyRef, articleMarkdownContent, articleTitleRef, articleIdRef)
 
-const parsedContent = computed(() => {
-  if (!currentArticle.value) return ''
+function slugifyHeading(text: string, fallbackIndex: number, usedIds: Set<string>) {
+  const base = text
+    .toLowerCase()
+    .trim()
+    .replace(/<[^>]+>/g, '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || `section-${fallbackIndex}`
+
+  let candidate = base
+  let suffix = 2
+  while (usedIds.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  usedIds.add(candidate)
+  return candidate
+}
+
+function buildRenderedArticlePayload(html: string): { html: string; toc: ArticleTocItem[] } {
+  if (typeof DOMParser === 'undefined') {
+    return { html, toc: [] }
+  }
+
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  const headings = Array.from(doc.body.querySelectorAll('h1, h2, h3, h4'))
+  const toc: ArticleTocItem[] = []
+  const usedIds = new Set<string>()
+
+  headings.forEach((heading, index) => {
+    const text = (heading.textContent || '').trim()
+    if (!text) return
+    const level = Number(heading.tagName.slice(1))
+    const existingId = heading.id?.trim()
+    const id = existingId && !usedIds.has(existingId)
+      ? existingId
+      : slugifyHeading(text, index + 1, usedIds)
+
+    usedIds.add(id)
+    heading.id = id
+    toc.push({ id, text, level })
+  })
+
+  return {
+    html: doc.body.innerHTML,
+    toc,
+  }
+}
+
+const renderedArticle = computed(() => {
+  if (!currentArticle.value) {
+    return {
+      html: '',
+      toc: [] as ArticleTocItem[],
+    }
+  }
   const content = currentArticle.value.content
   // Resolve image paths before markdown parsing (prevents backslash issues)
   const resolved = resolveLocalImagesInMarkdown(content)
-  return resolveLocalImages(marked.parse(resolved) as string)
+  const html = sanitizeRichHtml(resolveLocalImages(marked.parse(resolved) as string))
+  return buildRenderedArticlePayload(html)
 })
+
+const parsedContent = computed(() => renderedArticle.value.html)
+const articleToc = computed(() => renderedArticle.value.toc)
 
 const fontSizeMap = {
   small: '0.95rem',
@@ -225,6 +307,58 @@ const fontSizeLabel = {
   medium: '中',
   large: '大',
 }
+
+const readerWidthMap = {
+  narrow: '620px',
+  medium: '680px',
+  wide: '820px',
+}
+
+const readerWidthLabel = {
+  narrow: '窄',
+  medium: '中',
+  wide: '宽',
+}
+
+const readerWidthTitle = {
+  narrow: '窄栏',
+  medium: '标准',
+  wide: '宽栏',
+}
+
+const readerDensityLineHeightMap = {
+  compact: '1.72',
+  balanced: '1.9',
+  relaxed: '2.08',
+}
+
+const readerDensityImageWidthMap = {
+  compact: '68%',
+  balanced: '75%',
+  relaxed: '82%',
+}
+
+const readerDensityLabel = {
+  compact: '紧',
+  balanced: '中',
+  relaxed: '舒',
+}
+
+const readerDensityTitle = {
+  compact: '紧凑',
+  balanced: '均衡',
+  relaxed: '舒展',
+}
+
+const readerViewStyle = computed(() => ({
+  '--reader-content-width': readerWidthMap[readerWidth.value],
+  '--reader-line-height': readerDensityLineHeightMap[readerDensity.value],
+  '--reader-image-max-width': readerDensityImageWidthMap[readerDensity.value],
+}))
+
+const readerBodyStyle = computed(() => ({
+  fontSize: fontSizeMap[fontSize.value],
+}))
 
 const estimatedReadTime = computed(() => {
   if (!currentArticle.value) return 0
@@ -320,9 +454,115 @@ function triggerHighlight() {
 }
 
 function cycleFontSize() {
-  const sizes: ('small' | 'medium' | 'large')[] = ['small', 'medium', 'large']
+  const sizes: ReaderFontSize[] = ['small', 'medium', 'large']
   const idx = sizes.indexOf(fontSize.value)
-  fontSize.value = sizes[(idx + 1) % sizes.length]
+  setFontSize(sizes[(idx + 1) % sizes.length])
+}
+
+function setFontSize(next: ReaderFontSize) {
+  if (fontSize.value === next) return
+  fontSize.value = next
+  void persistReaderPreference(READER_FONT_SETTING_KEY, fontSize.value)
+}
+
+function adjustFontSize(step: 1 | -1) {
+  const sizes: ReaderFontSize[] = ['small', 'medium', 'large']
+  const idx = sizes.indexOf(fontSize.value)
+  const nextIdx = Math.max(0, Math.min(sizes.length - 1, idx + step))
+  if (nextIdx === idx) return
+  setFontSize(sizes[nextIdx])
+}
+
+function cycleReaderWidth() {
+  const widths: ReaderWidth[] = ['narrow', 'medium', 'wide']
+  const idx = widths.indexOf(readerWidth.value)
+  readerWidth.value = widths[(idx + 1) % widths.length]
+  void persistReaderPreference(READER_WIDTH_SETTING_KEY, readerWidth.value)
+}
+
+function cycleReaderDensity() {
+  const densities: ReaderDensity[] = ['compact', 'balanced', 'relaxed']
+  const idx = densities.indexOf(readerDensity.value)
+  readerDensity.value = densities[(idx + 1) % densities.length]
+  void persistReaderPreference(READER_DENSITY_SETTING_KEY, readerDensity.value)
+}
+
+function isReaderFontSize(value: string | null): value is ReaderFontSize {
+  return value === 'small' || value === 'medium' || value === 'large'
+}
+
+function isReaderWidth(value: string | null): value is ReaderWidth {
+  return value === 'narrow' || value === 'medium' || value === 'wide'
+}
+
+function isReaderDensity(value: string | null): value is ReaderDensity {
+  return value === 'compact' || value === 'balanced' || value === 'relaxed'
+}
+
+async function loadReaderPreferences() {
+  try {
+    await settingsStore.loadSettings()
+    const savedFontSize = settingsStore.getSettingImmediate(READER_FONT_SETTING_KEY)
+    const savedWidth = settingsStore.getSettingImmediate(READER_WIDTH_SETTING_KEY)
+    const savedDensity = settingsStore.getSettingImmediate(READER_DENSITY_SETTING_KEY)
+
+    if (isReaderFontSize(savedFontSize)) {
+      fontSize.value = savedFontSize
+    }
+
+    if (isReaderWidth(savedWidth)) {
+      readerWidth.value = savedWidth
+    }
+
+    if (isReaderDensity(savedDensity)) {
+      readerDensity.value = savedDensity
+    }
+  } catch (error) {
+    console.error('加载阅读器偏好失败:', error)
+  }
+}
+
+async function persistReaderPreference(key: string, value: string) {
+  try {
+    await settingsStore.setSetting(key, value)
+  } catch (error) {
+    console.error(`保存阅读器偏好失败: ${key}`, error)
+  }
+}
+
+function scrollToHeading(id: string) {
+  const target = readerBodyRef.value?.querySelector(`#${CSS.escape(id)}`) as HTMLElement | null
+  if (!target) return
+  activeTocId.value = id
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function updateActiveToc() {
+  if (!readerBodyRef.value || articleToc.value.length === 0) {
+    activeTocId.value = null
+    return
+  }
+
+  const headingElements = articleToc.value
+    .map((item) => readerBodyRef.value?.querySelector(`#${CSS.escape(item.id)}`) as HTMLElement | null)
+    .filter((item): item is HTMLElement => Boolean(item))
+
+  if (headingElements.length === 0) {
+    activeTocId.value = null
+    return
+  }
+
+  const current = headingElements
+    .filter((item) => item.getBoundingClientRect().top <= 140)
+  const active = current.length > 0 ? current[current.length - 1] : headingElements[0]
+
+  activeTocId.value = active.id
+}
+
+function handleReaderWheel(event: WheelEvent) {
+  if (!event.ctrlKey) return
+  event.preventDefault()
+  adjustFontSize(event.deltaY < 0 ? 1 : -1)
 }
 
 let scrollRafId: number | null = null
@@ -345,6 +585,7 @@ function handleScroll() {
     readingProgress.value = scrollHeight > 0 ? Math.min((scrollTop / scrollHeight) * 100, 100) : 0
     showFloatingHeader.value = scrollTop > 200
     updateQuickLookupPanelPosition()
+    updateActiveToc()
   })
 }
 
@@ -365,6 +606,7 @@ function closeReader() {
 // Initialize reader content
 async function initReader() {
   removeInlineSentenceTranslation()
+
   // Fetch full article content
   try {
     const fullArticle = await getArticle(props.article.id)
@@ -384,6 +626,7 @@ async function initReader() {
     await loadAnnotations()
     await nextTick()
     await nextTick()
+    updateActiveToc()
     setTimeout(() => {
       highlightAnnotatedContent()
       setTimeout(() => triggerHighlight(), 100)
@@ -397,7 +640,9 @@ async function initReader() {
 }
 
 onMounted(() => {
+  void loadReaderPreferences()
   initReader()
+  readerViewRef.value?.addEventListener('wheel', handleReaderWheel, { passive: false })
   getScrollContainer().addEventListener('scroll', handleScroll, { passive: true })
   document.addEventListener('mousedown', handlePageClick)
   window.addEventListener('resize', updateQuickLookupPanelPosition)
@@ -405,6 +650,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   removeInlineSentenceTranslation()
+  readerViewRef.value?.removeEventListener('wheel', handleReaderWheel)
   getScrollContainer().removeEventListener('scroll', handleScroll)
   document.removeEventListener('mousedown', handlePageClick)
   window.removeEventListener('resize', updateQuickLookupPanelPosition)
@@ -447,7 +693,7 @@ watch(() => props.highlightId, (newId) => {
 })
 </script>
 <template>
-  <div class="reader-view">
+  <div ref="readerViewRef" class="reader-view" :style="readerViewStyle">
     <!-- 阅读进度条 -->
     <div class="reading-progress-bar">
       <div class="reading-progress-fill" :style="{ width: readingProgress + '%' }"></div>
@@ -503,6 +749,37 @@ watch(() => props.highlightId, (newId) => {
             </svg>
             <span class="tool-label">{{ fontSizeLabel[fontSize] }}</span>
           </button>
+          <button class="tool-btn" @click="cycleReaderWidth" :title="'正文宽度: ' + readerWidthTitle[readerWidth]">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="4" y="6" width="16" height="12" rx="2"/>
+              <path d="M9 9v6M15 9v6"/>
+            </svg>
+            <span class="tool-label">{{ readerWidthLabel[readerWidth] }}</span>
+          </button>
+          <button class="tool-btn" @click="cycleReaderDensity" :title="'正文比例: ' + readerDensityTitle[readerDensity]">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 7h14"/>
+              <path d="M5 12h14"/>
+              <path d="M5 17h14"/>
+            </svg>
+            <span class="tool-label">{{ readerDensityLabel[readerDensity] }}</span>
+          </button>
+          <button
+            v-if="articleToc.length"
+            class="tool-btn"
+            @click="showArticleToc = !showArticleToc"
+            :title="showArticleToc ? '隐藏目录' : '显示目录'"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 6h12"/>
+              <path d="M8 12h12"/>
+              <path d="M8 18h12"/>
+              <circle cx="4" cy="6" r="1"/>
+              <circle cx="4" cy="12" r="1"/>
+              <circle cx="4" cy="18" r="1"/>
+            </svg>
+            <span class="tool-label">目录</span>
+          </button>
           <span class="progress-text">{{ Math.round(readingProgress) }}%</span>
         </div>
       </header>
@@ -550,17 +827,90 @@ watch(() => props.highlightId, (newId) => {
       </div>
     </header>
 
-    <!-- 文章正文 -->
-    <article
-      ref="readerBodyRef"
-      class="reader-body"
-      :class="{ 'annotations-hidden': !annotationEnabled }"
-      :style="{ fontSize: fontSizeMap[fontSize] }"
-      v-html="parsedContent"
-      @click="handleAnnotationClick"
-      @mouseover="handleHighlightHover"
-      @mouseout="handleHighlightLeave"
-    ></article>
+    <div v-if="currentArticle" class="reader-toolbar">
+      <button class="tool-btn reader-setting-btn" @click="cycleFontSize" :title="'字号: ' + fontSizeLabel[fontSize]">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 7V4h16v3"/>
+          <path d="M9 20h6"/>
+          <path d="M12 4v16"/>
+        </svg>
+        <span class="tool-label">字号 {{ fontSizeLabel[fontSize] }}</span>
+      </button>
+      <button class="tool-btn reader-setting-btn" @click="cycleReaderWidth" :title="'正文宽度: ' + readerWidthTitle[readerWidth]">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="4" y="6" width="16" height="12" rx="2"/>
+          <path d="M9 9v6M15 9v6"/>
+        </svg>
+        <span class="tool-label">宽度 {{ readerWidthTitle[readerWidth] }}</span>
+      </button>
+      <button class="tool-btn reader-setting-btn" @click="cycleReaderDensity" :title="'正文比例: ' + readerDensityTitle[readerDensity]">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 7h14"/>
+          <path d="M5 12h14"/>
+          <path d="M5 17h14"/>
+        </svg>
+        <span class="tool-label">比例 {{ readerDensityTitle[readerDensity] }}</span>
+      </button>
+      <button
+        v-if="articleToc.length"
+        class="tool-btn reader-setting-btn"
+        @click="showArticleToc = !showArticleToc"
+        :title="showArticleToc ? '隐藏目录' : '显示目录'"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 6h12"/>
+          <path d="M8 12h12"/>
+          <path d="M8 18h12"/>
+          <circle cx="4" cy="6" r="1"/>
+          <circle cx="4" cy="12" r="1"/>
+          <circle cx="4" cy="18" r="1"/>
+        </svg>
+        <span class="tool-label">{{ showArticleToc ? '隐藏目录' : '显示目录' }}</span>
+      </button>
+    </div>
+
+    <div
+      class="reader-content-shell"
+      :class="{ 'reader-content-shell--toc-hidden': !showArticleToc || articleToc.length === 0 }"
+    >
+      <aside v-if="articleToc.length && showArticleToc" class="reader-toc-sidebar">
+        <div class="reader-toc-header">
+          <div>
+            <h3>目录</h3>
+            <p>{{ articleToc.length }} 节</p>
+          </div>
+          <button class="tool-btn reader-toc-toggle-btn" @click="showArticleToc = false">
+            收起
+          </button>
+        </div>
+        <nav class="reader-toc-nav">
+          <button
+            v-for="item in articleToc"
+            :key="item.id"
+            class="reader-toc-link"
+            :class="[
+              `reader-toc-link--level-${Math.min(item.level, 4)}`,
+              { 'reader-toc-link--active': activeTocId === item.id },
+            ]"
+            @click="scrollToHeading(item.id)"
+          >
+            {{ item.text }}
+          </button>
+        </nav>
+      </aside>
+
+      <!-- 文章正文 -->
+      <article
+        ref="readerBodyRef"
+        class="reader-body"
+        :class="{ 'annotations-hidden': !annotationEnabled }"
+        :style="readerBodyStyle"
+        v-html="parsedContent"
+        @click="handleAnnotationClick"
+        @mouseover="handleHighlightHover"
+        @mouseout="handleHighlightLeave"
+      ></article>
+    </div>
 
 
 

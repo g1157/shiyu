@@ -6,7 +6,7 @@
 
 .reader-body {
   color: var(--c-text);
-  line-height: 1.9;
+  line-height: var(--reader-line-height, 1.9);
   font-size: 1.1rem;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -19,6 +19,7 @@
   font-weight: 800;
   color: var(--c-text);
   margin: 2.5rem 0 1rem;
+  scroll-margin-top: 72px;
   line-height: 1.3;
   letter-spacing: -0.02em;
   padding-bottom: 0.5rem;
@@ -30,6 +31,7 @@
   font-weight: 700;
   color: var(--c-text);
   margin: 2.2rem 0 0.8rem;
+  scroll-margin-top: 72px;
   line-height: 1.35;
   padding-left: 14px;
   border-left: 4px solid #007AFF;
@@ -40,6 +42,7 @@
   font-weight: 700;
   color: var(--c-text);
   margin: 1.8rem 0 0.6rem;
+  scroll-margin-top: 72px;
   line-height: 1.4;
 }
 
@@ -48,6 +51,7 @@
   font-weight: 600;
   color: var(--c-text);
   margin: 1.5rem 0 0.5rem;
+  scroll-margin-top: 72px;
 }
 
 .reader-body h5,
@@ -68,7 +72,7 @@
 
 /* 图片 */
 .reader-body img {
-  max-width: 75%;
+  max-width: min(100%, var(--reader-image-max-width, 75%));
   max-height: 500px;
   height: auto;
   border-radius: 10px;
