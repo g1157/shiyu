@@ -455,3 +455,36 @@ pub fn import_data_from_file(
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     apply_import_data(&mut conn, data, &mode)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_article_content_for_export, should_export_setting, IMAGE_ASSET_SCHEME};
+
+    #[test]
+    fn filters_sensitive_settings_from_export() {
+        assert!(should_export_setting("theme"));
+        assert!(should_export_setting("api_model"));
+        assert!(!should_export_setting("api_key"));
+        assert!(!should_export_setting("ocr_api_token"));
+        assert!(!should_export_setting("db_password"));
+        assert!(!should_export_setting("session_token"));
+        assert!(!should_export_setting("some_secret"));
+        assert!(!should_export_setting("custom_key"));
+    }
+
+    #[test]
+    fn rewrites_local_image_paths_into_backup_scheme() {
+        let content = concat!(
+            "![cover](C:/Users/demo/.shiyu/images/cover.png)\n",
+            "<img src=\"file:///C:/Users/demo/.shiyu/images/inline-photo.jpg\" />\n",
+            "<img src=\"C:/Users/demo/.shiyu/images/cover.png\" />"
+        );
+
+        let (normalized, files) = normalize_article_content_for_export(content);
+
+        assert_eq!(files, vec!["cover.png", "inline-photo.jpg"]);
+        assert!(normalized.contains(&format!("{IMAGE_ASSET_SCHEME}cover.png")));
+        assert!(normalized.contains(&format!("{IMAGE_ASSET_SCHEME}inline-photo.jpg")));
+        assert!(!normalized.contains(".shiyu/images/"));
+    }
+}
