@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window with scoped local file access",
   "windows": [
     "main"
   ],
@@ -9,28 +9,14 @@
     "core:default",
     "opener:default",
     "dialog:default",
-    "fs:default",
-    {
-      "identifier": "fs:allow-read-text-file",
-      "allow": [
-        {
-          "path": "**"
-        }
-      ]
-    },
-    {
-      "identifier": "fs:allow-write-text-file",
-      "allow": [
-        {
-          "path": "**"
-        }
-      ]
-    },
     {
       "identifier": "fs:allow-read-file",
       "allow": [
         {
-          "path": "**"
+          "path": "$HOME/.shiyu/tts-cache"
+        },
+        {
+          "path": "$HOME/.shiyu/tts-cache/**"
         }
       ]
     },
@@ -38,7 +24,10 @@
       "identifier": "fs:allow-write-file",
       "allow": [
         {
-          "path": "**"
+          "path": "$HOME/.shiyu/tts-cache"
+        },
+        {
+          "path": "$HOME/.shiyu/tts-cache/**"
         }
       ]
     },
@@ -46,7 +35,10 @@
       "identifier": "fs:allow-exists",
       "allow": [
         {
-          "path": "**"
+          "path": "$HOME/.shiyu/tts-cache"
+        },
+        {
+          "path": "$HOME/.shiyu/tts-cache/**"
         }
       ]
     },
@@ -54,7 +46,7 @@
       "identifier": "fs:allow-mkdir",
       "allow": [
         {
-          "path": "**"
+          "path": "$HOME/.shiyu/tts-cache"
         }
       ]
     },
@@ -68,4 +60,4 @@
     "core:window:allow-is-maximized",
     "core:window:allow-set-focus"
   ]
-}
+}
