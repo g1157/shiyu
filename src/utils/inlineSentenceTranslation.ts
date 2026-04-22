@@ -1,3 +1,5 @@
+import { sanitizeParsedSentenceHtml } from './sanitizeHtml'
+
 export interface InlineSentenceTranslationPayload {
   translation: string
   parsedHtml?: string
@@ -98,7 +100,7 @@ export function buildInlineSentenceTranslationBlock(
   if (payload.parsedHtml?.trim()) {
     const parsed = doc.createElement('div')
     parsed.className = 'inline-sentence-translation__parsed parsed-html-content'
-    parsed.innerHTML = payload.parsedHtml
+    parsed.innerHTML = sanitizeParsedSentenceHtml(payload.parsedHtml)
     block.appendChild(parsed)
   }
 

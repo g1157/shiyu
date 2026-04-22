@@ -4,6 +4,7 @@ import type { HighlightType } from './useRouteQuery'
 import { useGlobalToast } from './useGlobalToast'
 import { translateText } from '../services/api'
 import { buildSentenceExplanation } from '../utils/sentenceExplanation'
+import { sanitizeParsedSentenceHtml } from '../utils/sanitizeHtml'
 
 interface TooltipState {
   visible: boolean
@@ -337,7 +338,7 @@ export function useAnnotationInteraction(
         throw new Error('模型未返回结构化成分解析。')
       }
 
-      quickLookupParsedHtml.value = String(parsed.parsed_html).trim()
+      quickLookupParsedHtml.value = sanitizeParsedSentenceHtml(String(parsed.parsed_html).trim())
       quickLookupStructureNote.value = String(parsed.structure_note || '').trim()
       const translation = String(parsed.translation || '').trim()
       if (translation) {

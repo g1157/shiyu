@@ -7,6 +7,7 @@ import { parseEpubToc, extractEpubChapters, addArticle, importEpubAsBook, type T
 import { useGlobalToast } from '../composables/useGlobalToast'
 import { useAppStore } from '../stores/appStore'
 import { resolveLocalImages, resolveLocalImagesInMarkdown } from '../utils/imageResolver'
+import { sanitizeRichHtml } from '../utils/sanitizeHtml'
 import '../styles/reader-typography.css'
 
 marked.setOptions({ gfm: true, breaks: true })
@@ -26,7 +27,7 @@ type ExtractedChapter = ChapterResult & {
 /** Render markdown with local image path resolution */
 function renderMarkdown(md: string): string {
   const resolved = resolveLocalImagesInMarkdown(md)
-  return resolveLocalImages(marked.parse(resolved) as string)
+  return sanitizeRichHtml(resolveLocalImages(marked.parse(resolved) as string))
 }
 // Toggle raw markdown vs rendered preview
 const showRaw = ref<Record<number, boolean>>({})

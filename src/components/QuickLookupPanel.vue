@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, type CSSProperties } from 'vue'
+import { sanitizeParsedSentenceHtml } from '../utils/sanitizeHtml'
 
 interface QuickLookupPosition {
   top: number
@@ -83,6 +84,7 @@ const highlightedContext = computed(() => {
 const hasExtendedWordMeanings = computed(() =>
   Boolean(props.baseMeaning?.trim()) || Boolean(props.otherMeanings?.length),
 )
+const safeParsedHtml = computed(() => sanitizeParsedSentenceHtml(props.parsedHtml || ''))
 const canSave = computed(() => hasResult.value && !props.loading && !props.saving)
 const panelWidth = computed(() => {
   if (typeof window === 'undefined') return 380
@@ -281,9 +283,9 @@ const panelStyle = computed<CSSProperties>(() => {
                 <div class="qlp-translation">{{ translation }}</div>
               </section>
 
-              <section v-if="parsedHtml" class="qlp-card">
+              <section v-if="safeParsedHtml" class="qlp-card">
                 <div class="qlp-label">深度解析</div>
-                <div class="qlp-parsed" v-html="parsedHtml"></div>
+                <div class="qlp-parsed" v-html="safeParsedHtml"></div>
                 <div v-if="structureNote" class="qlp-note">{{ structureNote }}</div>
               </section>
 
@@ -302,7 +304,7 @@ const panelStyle = computed<CSSProperties>(() => {
           </template>
           <template v-else>
             <button
-              v-if="type === 'sentence' && !parsedHtml"
+              v-if="type === 'sentence' && !safeParsedHtml"
               class="qlp-btn qlp-btn-secondary"
               :disabled="loading || deepLoading || saving"
               @click="emit('deepen')"

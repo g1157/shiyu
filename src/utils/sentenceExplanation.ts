@@ -1,4 +1,5 @@
 // 长难句解释的结构化工具函数
+import { sanitizeParsedSentenceHtml } from './sanitizeHtml'
 
 export interface SentenceExplanationParts {
     parsedHtml: string
@@ -30,7 +31,7 @@ export function splitSentenceExplanation(explanation: string): SentenceExplanati
     // 匹配成分划分
     const parsedMatch = raw.match(new RegExp(`(${PARSED_HTML_LABELS.join('|')})[：:]\\s*([\\s\\S]*?)(?=(?:\\n(?:${[...STRUCTURE_NOTE_LABELS, ...TRANSLATION_LABELS].join('|')})[：:])|$)`))
     if (parsedMatch) {
-        parsedHtml = parsedMatch[2].trim()
+        parsedHtml = sanitizeParsedSentenceHtml(parsedMatch[2].trim())
     }
 
     // 匹配成分分析
@@ -56,7 +57,7 @@ export function splitSentenceExplanation(explanation: string): SentenceExplanati
         if (analysisMatch) legacyAnalysis = analysisMatch[1].trim()
 
         if (legacySummary || legacyAnalysis) {
-            parsedHtml = [legacySummary, legacyAnalysis].filter(Boolean).join('\n')
+            parsedHtml = sanitizeParsedSentenceHtml([legacySummary, legacyAnalysis].filter(Boolean).join('\n'))
         }
     }
 
@@ -64,7 +65,7 @@ export function splitSentenceExplanation(explanation: string): SentenceExplanati
         return { parsedHtml: '', structureNote: '', translation: '', raw }
     }
 
-    return { parsedHtml, structureNote, translation, raw }
+    return { parsedHtml: sanitizeParsedSentenceHtml(parsedHtml), structureNote, translation, raw }
 }
 
 /**
@@ -81,7 +82,8 @@ export function getSentenceMeaning(explanation: string): string {
  */
 export function buildSentenceExplanation(parsedHtml: string, structureNote: string, translation: string): string {
     const lines: string[] = []
-    if (parsedHtml.trim()) lines.push(`成分划分：${parsedHtml.trim()}`)
+    const safeParsedHtml = sanitizeParsedSentenceHtml(parsedHtml)
+    if (safeParsedHtml.trim()) lines.push(`成分划分：${safeParsedHtml.trim()}`)
     if (structureNote.trim()) lines.push(`成分分析：${structureNote.trim()}`)
     if (translation.trim()) lines.push(`释义：${translation.trim()}`)
     return lines.join('\n')

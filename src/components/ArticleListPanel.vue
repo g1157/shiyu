@@ -8,6 +8,7 @@ import { useBatchSelection } from '../composables/useBatchSelection'
 import { useAppStore } from '../stores/appStore'
 import { formatDate } from '../utils/format'
 import { useGlobalToast } from '../composables/useGlobalToast'
+import { sanitizeRichHtml } from '../utils/sanitizeHtml'
 
 import '../styles/article-list.css'
 import '../styles/reader-typography.css'
@@ -48,7 +49,7 @@ import { resolveLocalImages, resolveLocalImagesInMarkdown } from '../utils/image
 const previewHtml = computed(() => {
   if (!newArticle.value.content) return ''
   const resolved = resolveLocalImagesInMarkdown(newArticle.value.content)
-  return resolveLocalImages(marked.parse(resolved) as string)
+  return sanitizeRichHtml(resolveLocalImages(marked.parse(resolved) as string))
 })
 
 const filteredArticles = computed(() => {

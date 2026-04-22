@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { translateText } from '../services/api'
 import { buildSentenceExplanation } from '../utils/sentenceExplanation'
+import { sanitizeParsedSentenceHtml } from '../utils/sanitizeHtml'
 
 const props = defineProps<{
   selectedText: string
@@ -30,6 +31,7 @@ const structureParsed = ref(props.initialStructureParsed || '')
 const structureNote = ref(props.initialStructureNote || '')
 const isParsing = ref(false)
 const parseError = ref('')
+const safeStructureParsed = computed(() => sanitizeParsedSentenceHtml(structureParsed.value))
 
 function parseModelResult(text: string) {
   const raw = text.trim()
@@ -163,13 +165,13 @@ async function handleAIAnalyze() {
     const content = result.trim()
     const parsed = parseModelResult(content)
     if (parsed && parsed.parsed_html) {
-      structureParsed.value = parsed.parsed_html
+      structureParsed.value = sanitizeParsedSentenceHtml(String(parsed.parsed_html))
       structureNote.value = parsed.structure_note || ''
       if (parsed.translation) {
         sentenceTranslation.value = String(parsed.translation).trim()
       }
     } else if (content) {
-      structureParsed.value = content
+      structureParsed.value = sanitizeParsedSentenceHtml(content)
     }
   } catch (e: any) {
     parseError.value = e?.message || e?.toString() || '划分失败'
@@ -271,11 +273,11 @@ onUnmounted(() => {
             </div>
 
             <!-- 成分划分结果 -->
-            <div v-if="structureParsed" class="parsed-structure-panel">
+            <div v-if="safeStructureParsed" class="parsed-structure-panel">
               <div class="parsed-header">
                 <span class="parsed-label">🔬 成分划分</span>
               </div>
-              <div class="parsed-content" v-html="structureParsed"></div>
+              <div class="parsed-content" v-html="safeStructureParsed"></div>
               <div v-if="structureNote" class="parsed-note">{{ structureNote }}</div>
             </div>
             <div v-if="parseError" class="ai-error">{{ parseError }}</div>
