@@ -15,9 +15,11 @@ function close() { appWindow.close() }
 const route = useRoute()
 const settingsStore = useSettingsStore()
 const mascotRoutes = ['/', '/translate', '/epub-import', '/ocr-import', '/data', '/settings']
+const keepAliveRoutes = new Set(['home', 'vocabulary', 'sentences', 'review', 'translate', 'settings', 'guide', 'data'])
 const showMascot = computed(() => mascotRoutes.includes(route.path))
 const currentTheme = computed(() => (settingsStore.theme === 'dark' ? 'dark' : 'light'))
 const themeToggleTitle = computed(() => currentTheme.value === 'dark' ? '切换到浅色模式' : '切换到深色模式')
+const shouldKeepAlive = computed(() => keepAliveRoutes.has(String(route.name || '')))
 
 void settingsStore.loadSettings()
 
@@ -94,9 +96,10 @@ onBeforeUnmount(() => {
       </div>
       <main class="app-main">
         <RouterView v-slot="{ Component, route }">
-          <KeepAlive>
+          <KeepAlive v-if="shouldKeepAlive">
             <component :is="Component" :key="route.path" />
           </KeepAlive>
+          <component v-else :is="Component" :key="route.path" />
         </RouterView>
       </main>
     </div>

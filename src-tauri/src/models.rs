@@ -166,6 +166,8 @@ pub struct ArticleItem {
     pub description: Option<String>,
     pub word_count: i64,
     pub created_at: i64,
+    #[serde(default)]
+    pub mindmap_markdown: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,10 +188,36 @@ pub struct UpdateArticleContentRequest {
 
 // ── Data Import/Export ───────────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportEbookItem {
+    pub id: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub format: String,
+    pub progress: f64,
+    pub cfi_position: Option<String>,
+    pub last_read_at: Option<i64>,
+    pub created_at: i64,
+    pub source_hash: Option<String>,
+    pub file_name: String,
+    #[serde(default)]
+    pub file_data_base64: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportAssetItem {
+    pub relative_path: String,
+    pub data_base64: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExportData {
     pub vocabulary: Vec<VocabularyItem>,
     pub sentences: Vec<SentenceItem>,
     pub settings: Vec<SettingItem>,
     pub articles: Vec<ArticleItem>,
+    #[serde(default)]
+    pub ebooks: Vec<ExportEbookItem>,
+    #[serde(default)]
+    pub assets: Vec<ExportAssetItem>,
 }

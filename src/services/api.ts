@@ -217,6 +217,8 @@ export interface ExportData {
     sentences: SentenceItem[]
     settings: { key: string; value: string }[]
     articles: ArticleItem[]
+    ebooks: ExportEbookItem[]
+    assets: ExportAssetItem[]
 }
 
 export async function exportAllData(): Promise<ExportData> {
@@ -240,6 +242,25 @@ export interface EbookItem {
     last_read_at?: number
     created_at: number
     source_hash?: string
+}
+
+export interface ExportEbookItem {
+    id: string
+    title: string
+    author?: string
+    format: string
+    progress: number
+    cfi_position?: string
+    last_read_at?: number
+    created_at: number
+    source_hash?: string
+    file_name: string
+    file_data_base64?: string | null
+}
+
+export interface ExportAssetItem {
+    relative_path: string
+    data_base64: string
 }
 
 export interface UpdateEbookProgressRequest {
@@ -279,6 +300,7 @@ export interface ArticleItem {
     description?: string
     word_count: number
     created_at: number
+    mindmap_markdown?: string | null
 }
 
 export interface AddArticleRequest {

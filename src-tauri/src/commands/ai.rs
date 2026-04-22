@@ -3,7 +3,16 @@ use crate::db::Database;
 use crate::models::{ArticleTranslateRequest, TranslateRequest, TranslateResponse};
 use futures_util::StreamExt;
 use serde_json::json;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
+
+fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
+}
 
 fn get_setting_value(conn: &rusqlite::Connection, key: &str) -> Option<String> {
     conn.prepare("SELECT value FROM settings WHERE key = ?1")
@@ -153,7 +162,7 @@ async fn maybe_translate_sentence_quick(
         return Err("快速句译内容为空".to_string());
     }
 
-    let client = reqwest::Client::new();
+    let client = build_http_client(30)?;
     let translated = match provider.as_str() {
         "google" => translate_sentence_quick_with_google(&client, &text).await?,
         "deeplx" => {
@@ -270,7 +279,7 @@ pub async fn translate_text(
         ),
     };
 
-    let client = reqwest::Client::new();
+    let client = build_http_client(90)?;
     let response = client
         .post(&api_url)
         .header("Authorization", format!("Bearer {}", api_key))
@@ -321,7 +330,7 @@ pub async fn test_api_connection(db: State<'_, Database>) -> Result<String, Stri
         (key, url, model)
     };
 
-    let client = reqwest::Client::new();
+    let client = build_http_client(20)?;
     let response = client
         .post(&api_url)
         .header("Authorization", format!("Bearer {}", api_key))
@@ -368,7 +377,7 @@ pub async fn translate_article_stream(
 
     let system_prompt = "你是一个纯粹的英译中翻译器。规则：\n1. 只输出中文译文，不加任何说明、解释、回答、标记或前缀\n2. 无论原文是陈述句、疑问句还是任何体裁，都只做翻译，绝不回答原文中的问题\n3. 翻译要做到信达雅，保持原文的语气、风格和修辞\n4. 如果原文已经是中文则原样返回\n5. 如果原文是标题/小标题，翻译后保持简洁，不要扩展";
 
-    let client = reqwest::Client::new();
+    let client = build_http_client(180)?;
 
     // Translate title if provided (index = -2)
     if let Some(ref title) = req.title {

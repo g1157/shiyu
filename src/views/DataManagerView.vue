@@ -75,17 +75,18 @@ async function handleImport(mode: string) {
     <h3 class="group-title">导出</h3>
     <div class="settings-group">
       <div class="group-body">
-        <p class="group-desc">将你的生词、句子和设置导出为 JSON 文件进行备份</p>
+        <p class="group-desc">将生词、句子、文章、图书文件、关联图片和非敏感设置导出为 JSON 备份</p>
         <button class="btn btn-primary" @click="handleExport" :disabled="exporting">
           {{ exporting ? '导出中...' : '导出全部数据' }}
         </button>
+        <p class="group-desc" style="margin-top: 10px; margin-bottom: 0;">`api_key`、OCR Token 等敏感密钥不会进入备份，导入后需在设置页重新填写。</p>
       </div>
     </div>
 
     <h3 class="group-title">导入</h3>
     <div class="settings-group">
       <div class="group-body">
-        <p class="group-desc">从 JSON 备份文件恢复数据</p>
+        <p class="group-desc">从 JSON 备份文件恢复数据；覆盖导入会替换当前文章、图书和本地图片资源</p>
         <div class="import-actions">
           <button class="btn btn-outline" @click="handleImport('merge')" :disabled="importing">
             合并导入（保留现有数据）

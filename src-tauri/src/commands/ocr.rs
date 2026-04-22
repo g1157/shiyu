@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 // ── 数据结构 ──────────────────────────────────────────
@@ -54,6 +55,14 @@ struct PpMarkdown {
     text: String,
     #[serde(default)]
     images: HashMap<String, String>,
+}
+
+fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
 }
 
 // ── 工具函数 ──────────────────────────────────────────
@@ -215,7 +224,7 @@ pub async fn ocr_extract_pages(
     }
 
     let (api_url, token) = get_ocr_settings(&db)?;
-    let client = reqwest::Client::new();
+    let client = build_http_client(120)?;
     let total = image_paths.len();
     let mut results: Vec<OcrPageResult> = Vec::with_capacity(total);
 
@@ -403,7 +412,7 @@ pub async fn ocr_refine_with_ai(
 
 只输出校正后的文章 Markdown 内容，不要输出其他任何内容。"#;
 
-    let client = reqwest::Client::new();
+    let client = build_http_client(180)?;
     let response = client
         .post(&api_url)
         .header("Authorization", format!("Bearer {}", api_key))

@@ -16,6 +16,7 @@ impl FromRow for ArticleItem {
             description: row.get(5)?,
             word_count: row.get(6)?,
             created_at: row.get(7)?,
+            mindmap_markdown: row.get(8)?,
         })
     }
 }
@@ -31,7 +32,7 @@ impl ArticleRepository {
     /// 获取文章列表（不包含content字段）
     pub fn find_all(&self, conn: &MutexGuard<Connection>) -> Result<Vec<ArticleItem>> {
         let mut stmt = conn.prepare(
-            "SELECT id, title, '' as content, author, category, description, word_count, created_at
+            "SELECT id, title, '' as content, author, category, description, word_count, created_at, mindmap_markdown
              FROM articles
              ORDER BY created_at DESC",
         )?;
@@ -50,7 +51,7 @@ impl ArticleRepository {
         id: &str,
     ) -> Result<Option<ArticleItem>> {
         let result = conn.query_row(
-            "SELECT id, title, content, author, category, description, word_count, created_at
+            "SELECT id, title, content, author, category, description, word_count, created_at, mindmap_markdown
              FROM articles WHERE id = ?1",
             [id],
             |row| ArticleItem::from_row(row),
@@ -88,6 +89,7 @@ impl ArticleRepository {
             description: req.description,
             word_count,
             created_at: now,
+            mindmap_markdown: None,
         })
     }
 

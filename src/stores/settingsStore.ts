@@ -24,8 +24,8 @@ export const useSettingsStore = defineStore('settings', () => {
   })
 
   const modelName = computed({
-    get: () => settings.value['model_name'] || 'deepseek-chat',
-    set: (val: string) => setSettingValue('model_name', val),
+    get: () => settings.value['api_model'] || settings.value['model_name'] || 'deepseek-chat',
+    set: (val: string) => setSettingValue('api_model', val),
   })
 
   const theme = computed({
