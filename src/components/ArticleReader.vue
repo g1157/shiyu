@@ -526,7 +526,10 @@ function updateActiveToc() {
 }
 
 function handleReaderWheel(event: WheelEvent) {
-  if (!event.ctrlKey) return
+  if (!event.ctrlKey) {
+    dismissSelectionOverlaysOnScroll()
+    return
+  }
   event.preventDefault()
   adjustFontSize(event.deltaY < 0 ? 1 : -1)
 }
@@ -617,6 +620,7 @@ onMounted(() => {
   void loadReaderPreferences()
   initReader()
   readerViewRef.value?.addEventListener('wheel', handleReaderWheel, { passive: false })
+  readerViewRef.value?.addEventListener('touchmove', dismissSelectionOverlaysOnScroll, { passive: true })
   getScrollContainer().addEventListener('scroll', handleScroll, { passive: true })
   document.addEventListener('mousedown', handlePageClick)
   window.addEventListener('resize', updateQuickLookupPanelPosition)
@@ -625,6 +629,7 @@ onMounted(() => {
 onUnmounted(() => {
   removeInlineSentenceTranslation()
   readerViewRef.value?.removeEventListener('wheel', handleReaderWheel)
+  readerViewRef.value?.removeEventListener('touchmove', dismissSelectionOverlaysOnScroll)
   getScrollContainer().removeEventListener('scroll', handleScroll)
   document.removeEventListener('mousedown', handlePageClick)
   window.removeEventListener('resize', updateQuickLookupPanelPosition)
