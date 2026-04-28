@@ -235,7 +235,10 @@ const panelStyle = computed<CSSProperties>(() => {
           <section class="qlp-card">
             <div class="qlp-label">{{ type === 'word' ? '当前词语' : '当前句子' }}</div>
             <div class="qlp-selected-row">
-              <div class="qlp-selected">{{ selectedText }}</div>
+              <div class="qlp-selected-main">
+                <div class="qlp-selected">{{ selectedText }}</div>
+                <span v-if="type === 'word' && phonetic" class="qlp-selected-phonetic">{{ phonetic }}</span>
+              </div>
               <button
                 v-if="type === 'word'"
                 class="qlp-speak-btn"
@@ -284,7 +287,6 @@ const panelStyle = computed<CSSProperties>(() => {
             <section v-if="type === 'word' && meaning" class="qlp-card">
               <div class="qlp-label">当前语境义</div>
               <div class="qlp-meaning-row">
-                <span v-if="phonetic" class="qlp-chip qlp-chip--phonetic">{{ phonetic }}</span>
                 <span v-if="wordPos" class="qlp-chip">{{ wordPos }}</span>
                 <span class="qlp-meaning">{{ meaning }}</span>
               </div>
@@ -495,12 +497,28 @@ const panelStyle = computed<CSSProperties>(() => {
   gap: 12px;
 }
 
+.qlp-selected-main {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .qlp-selected {
   min-width: 0;
   font-family: var(--font-serif);
   font-size: 15px;
   line-height: 1.8;
   color: var(--c-text);
+}
+
+.qlp-selected-phonetic {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--c-primary-dark);
 }
 
 .qlp-speak-btn {
