@@ -181,11 +181,11 @@ export function useAnnotationInteraction(
     return segments.join(' - ') || quickLookupMeaning.value.trim()
   }
 
-  async function runQuickLookup(type: HighlightType, text: string, contextText: string, requestId: number, useContext = false) {
+  async function runQuickLookup(type: HighlightType, text: string, contextText: string, requestId: number) {
     try {
       const req = type === 'word'
         ? {
-            text: useContext && contextText ? `单词：${text}\n语境：${contextText}` : text,
+            text: contextText ? `单词：${text}\n语境：${contextText}` : text,
             prompt_type: 'word_quick' as const,
           }
         : {
@@ -202,7 +202,7 @@ export function useAnnotationInteraction(
 
       const parsed = parseModelResult(content)
       if (type === 'word') {
-        quickLookupUsedContext.value = useContext
+        quickLookupUsedContext.value = Boolean(contextText.trim())
         quickLookupWordPos.value = String(parsed?.pos || '').trim()
         quickLookupPhonetic.value = String(parsed?.phonetic || parsed?.uk || parsed?.us || '').trim()
         quickLookupMeaning.value = String(parsed?.meaning || parsed?.zh || content).trim()
@@ -253,11 +253,11 @@ export function useAnnotationInteraction(
     quickLookupDeepLoading.value = false
     quickLookupSaving.value = false
     resetQuickLookupData()
-    quickLookupUsedContext.value = false
+    quickLookupUsedContext.value = type === 'word' && Boolean(contextText.trim())
     clearSelection()
 
     const requestId = ++quickLookupRequestId
-    void runQuickLookup(type, selectedText, contextText, requestId, false)
+    void runQuickLookup(type, selectedText, contextText, requestId)
   }
 
   // Methods
@@ -312,15 +312,13 @@ export function useAnnotationInteraction(
     quickLookupDeepLoading.value = false
     quickLookupSaving.value = false
     resetQuickLookupData()
-    const useContext = quickLookupType.value === 'word' && Boolean(quickLookupContextText.value.trim())
-    quickLookupUsedContext.value = useContext
+    quickLookupUsedContext.value = quickLookupType.value === 'word' && Boolean(quickLookupContextText.value.trim())
     const requestId = ++quickLookupRequestId
     void runQuickLookup(
       quickLookupType.value,
       quickLookupSelectedText.value,
       quickLookupContextText.value,
       requestId,
-      useContext,
     )
   }
 

@@ -93,9 +93,6 @@ const safeParsedHtml = computed(() => sanitizeParsedSentenceHtml(props.parsedHtm
 const wordTtsKey = computed(() => `${props.selectedText.trim()}__-10%`)
 const wordIsLoading = computed(() => isLoading.value && loadingKey.value === wordTtsKey.value)
 const wordIsSpeaking = computed(() => isSpeaking.value && speakingKey.value === wordTtsKey.value)
-const canRetryWithContext = computed(() =>
-  props.type === 'word' && Boolean(normalizedContext.value) && !props.usedContext && !props.loading && !props.saving,
-)
 const canSave = computed(() => hasResult.value && !props.loading && !props.saving)
 const panelWidth = computed(() => {
   if (typeof window === 'undefined') return 380
@@ -351,14 +348,6 @@ const panelStyle = computed<CSSProperties>(() => {
               @click="emit('inline')"
             >
               句下展开
-            </button>
-            <button
-              v-if="canRetryWithContext"
-              class="qlp-btn qlp-btn-secondary"
-              :disabled="loading || saving"
-              @click="emit('retry')"
-            >
-              结合语境重查
             </button>
             <button
               class="qlp-btn qlp-btn-secondary"
