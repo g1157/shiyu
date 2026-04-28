@@ -158,20 +158,26 @@ async fn maybe_translate_sentence_quick(
 
     let client = build_http_client(30)?;
     let translated = match provider.as_str() {
-        "google" => translate_sentence_quick_with_google(&client, &text).await?,
+        "google" => translate_sentence_quick_with_google(&client, &text).await,
         "deeplx" => {
             let url = read_setting(db, "quick_sentence_deeplx_url")?
                 .unwrap_or_else(|| "http://127.0.0.1:1188/translate".to_string());
             let trimmed = url.trim();
             if trimmed.is_empty() {
-                return Err("DeepLX 地址未配置".to_string());
+                return Ok(None);
             }
-            translate_sentence_quick_with_deeplx(&client, trimmed, &text).await?
+            translate_sentence_quick_with_deeplx(&client, trimmed, &text).await
         }
         _ => return Ok(None),
     };
 
-    Ok(Some(translated))
+    match translated {
+        Ok(response) => Ok(Some(response)),
+        Err(e) => {
+            eprintln!("快速句译失败，回退到 LLM: {}", e);
+            Ok(None)
+        }
+    }
 }
 
 #[tauri::command]
@@ -198,8 +204,8 @@ pub async fn translate_text(
             200,
         ),
         "word_quick" => (
-            "你是英语阅读场景下的快速查词助手。用户会提供单词和可选语境。请只输出 JSON：{\"pos\":\"词性缩写\",\"meaning\":\"结合语境的简洁中文释义\",\"base_meaning\":\"该词较核心或较常见的本意\",\"other_meanings\":[\"其他常见义1\",\"其他常见义2\"]}。要求：1. pos 使用 n./v./adj./adv./prep./conj./pron./det./interj. 这类缩写；2. meaning 只写当前语境下最贴切的中文义项，不超过18个汉字；3. base_meaning 写该词较核心或较常见的本意，不超过18个汉字；4. other_meanings 最多返回3个与当前语境不同的常见义项，每项不超过12个汉字，不要和 meaning/base_meaning 重复；5. 不要英文，不要例句，不要额外解释。",
-            220,
+            "你是英语阅读场景下的快速查词助手。用户会提供单词和可选语境。请只输出 JSON：{\"pos\":\"词性缩写\",\"phonetic\":\"音标\",\"meaning\":\"简洁中文释义\",\"base_meaning\":\"该词较核心或较常见的本意\",\"other_meanings\":[\"其他常见义1\",\"其他常见义2\"]}。要求：1. pos 使用 n./v./adj./adv./prep./conj./pron./det./interj. 这类缩写；2. phonetic 返回常见英式或美式音标，带 / / 或 [ ]，无法确定则返回空字符串；3. meaning 若有语境则写当前语境下最贴切的中文义项，否则写最常见中文义项，不超过18个汉字；4. base_meaning 写该词较核心或较常见的本意，不超过18个汉字；5. other_meanings 最多返回3个与 meaning/base_meaning 不同的常见义项，每项不超过12个汉字；6. 不要英文释义，不要例句，不要额外解释。",
+            260,
         ),
         "sentence" => (
             "你是一个英语学习助手。用户会给你一个英文句子，请翻译成中文，并简要解释句子结构。",

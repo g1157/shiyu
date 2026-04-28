@@ -32,6 +32,7 @@ import {
   isInlineSentenceTranslationBlock,
   resolveInlineSentenceAnchor,
 } from '../utils/inlineSentenceTranslation'
+import { clearTransientWordHighlights, highlightTransientWord } from '../utils/transientWordHighlight'
 
 interface TocNode {
   uid: string
@@ -112,12 +113,6 @@ const bookReaderWidthMap = {
   wide: '860px',
 }
 
-const bookReaderWidthLabel = {
-  narrow: '窄栏',
-  medium: '标准',
-  wide: '宽栏',
-}
-
 const bookReaderDensityLineHeightMap = {
   compact: '1.82',
   balanced: '1.98',
@@ -128,12 +123,6 @@ const bookReaderDensityImageWidthMap = {
   compact: '68%',
   balanced: '75%',
   relaxed: '82%',
-}
-
-const bookReaderDensityLabel = {
-  compact: '紧凑',
-  balanced: '均衡',
-  relaxed: '舒展',
 }
 
 const BOOK_TOOLBAR_SCROLL_THRESHOLD = 96
@@ -193,6 +182,8 @@ const {
   quickLookupSelectedText,
   quickLookupContextText,
   quickLookupWordPos,
+  quickLookupPhonetic,
+  quickLookupUsedContext,
   quickLookupMeaning,
   quickLookupBaseMeaning,
   quickLookupOtherMeanings,
@@ -682,6 +673,28 @@ body mark {
   color: inherit !important;
 }
 
+body mark.active-lookup-word,
+body mark.active-lookup-word-subtle {
+  background: ${mode === 'dark' ? 'rgba(96, 165, 250, 0.08)' : 'rgba(37, 99, 235, 0.04)'} !important;
+  color: inherit !important;
+  padding: 0 2px !important;
+  margin: 0 -2px;
+  border-radius: 5px;
+  text-decoration: none !important;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  box-shadow: inset 0 -2px 0 ${mode === 'dark' ? 'rgba(147, 197, 253, 0.92)' : 'rgba(37, 99, 235, 0.9)'}, 0 0 0 1px ${mode === 'dark' ? 'rgba(147, 197, 253, 0.72)' : 'rgba(37, 99, 235, 0.72)'};
+}
+
+body mark.active-lookup-word {
+  box-shadow: inset 0 -3px 0 ${mode === 'dark' ? 'rgba(147, 197, 253, 0.96)' : 'rgba(37, 99, 235, 0.95)'}, 0 0 0 2px ${mode === 'dark' ? 'rgba(147, 197, 253, 0.82)' : 'rgba(37, 99, 235, 0.78)'};
+}
+
+body mark.active-lookup-word-subtle {
+  background: transparent !important;
+  box-shadow: inset 0 -2px 0 ${mode === 'dark' ? 'rgba(147, 197, 253, 0.72)' : 'rgba(37, 99, 235, 0.68)'}, 0 0 0 1px ${mode === 'dark' ? 'rgba(147, 197, 253, 0.38)' : 'rgba(37, 99, 235, 0.34)'};
+}
+
 body del {
   color: var(--c-text-lighter) !important;
 }
@@ -972,6 +985,29 @@ function clearNativeSelections() {
   }
 }
 
+function currentTransientHighlightWord() {
+  if (quickLookupVisible.value && quickLookupType.value === 'word') {
+    return quickLookupSelectedText.value
+  }
+  if (selection.value.type === 'word') {
+    return selection.value.text
+  }
+  return ''
+}
+
+function syncTransientWordHighlights() {
+  const word = currentTransientHighlightWord()
+  for (const contents of getRenderedContents()) {
+    const body = contents?.document?.body as HTMLElement | null | undefined
+    if (!body) continue
+    if (word) {
+      highlightTransientWord(body, word)
+    } else {
+      clearTransientWordHighlights(body)
+    }
+  }
+}
+
 function clearSelection() {
   selection.value = {
     text: '',
@@ -1217,6 +1253,18 @@ function scheduleQuickLookupPanelPositionUpdate() {
   requestAnimationFrame(() => updateQuickLookupPanelPosition())
 }
 
+function dismissSelectionOverlaysOnScroll() {
+  if (!popoverPosition.value.visible && !quickLookupVisible.value && !selection.value.text) return
+  closeQuickLookup()
+  quickLookupPanelPosition.value = null
+  clearSelection()
+}
+
+function handleShellScroll() {
+  dismissSelectionOverlaysOnScroll()
+  updateToolbarVisibility()
+}
+
 function handleSelected(_cfiRange: string, contents: any) {
   const nativeSelection = contents?.window?.getSelection?.()
   if (!nativeSelection || nativeSelection.isCollapsed || nativeSelection.rangeCount === 0) {
@@ -1262,7 +1310,11 @@ function attachContentInteraction(contents: any) {
       clearSelection()
     }
   }
-  const onViewportChange = () => {
+  const onContentScroll = () => {
+    dismissSelectionOverlaysOnScroll()
+    updateToolbarVisibility()
+  }
+  const onViewportResize = () => {
     if (quickLookupVisible.value) {
       scheduleQuickLookupPanelPositionUpdate()
     }
@@ -1323,8 +1375,8 @@ function attachContentInteraction(contents: any) {
   contents.document.addEventListener('touchstart', onPointerDown)
   contents.document.addEventListener('mousemove', onPointerMove)
   contents.document.addEventListener('mouseleave', onPointerLeave)
-  contents.window?.addEventListener?.('scroll', onViewportChange, { passive: true })
-  contents.window?.addEventListener?.('resize', onViewportChange)
+  contents.window?.addEventListener?.('scroll', onContentScroll, { passive: true })
+  contents.window?.addEventListener?.('resize', onViewportResize)
   contents.document.addEventListener('wheel', onWheel, { passive: false })
 
   contentCleanupFns.push(() => {
@@ -1335,8 +1387,8 @@ function attachContentInteraction(contents: any) {
       contents.document.removeEventListener('touchstart', onPointerDown)
       contents.document.removeEventListener('mousemove', onPointerMove)
       contents.document.removeEventListener('mouseleave', onPointerLeave)
-      contents.window?.removeEventListener?.('scroll', onViewportChange)
-      contents.window?.removeEventListener?.('resize', onViewportChange)
+      contents.window?.removeEventListener?.('scroll', onContentScroll)
+      contents.window?.removeEventListener?.('resize', onViewportResize)
       contents.document.removeEventListener('wheel', onWheel)
     } catch {}
   })
@@ -1579,20 +1631,6 @@ function adjustFontSize(step: 1 | -1) {
   const nextIdx = Math.max(0, Math.min(sizes.length - 1, idx + step))
   if (nextIdx === idx) return
   setFontSize(sizes[nextIdx])
-}
-
-function cycleReaderWidth() {
-  const widths: ReaderWidth[] = ['narrow', 'medium', 'wide']
-  const idx = widths.indexOf(readerWidth.value)
-  readerWidth.value = widths[(idx + 1) % widths.length]
-  void persistReaderPreference(READER_WIDTH_SETTING_KEY, readerWidth.value)
-}
-
-function cycleReaderDensity() {
-  const densities: ReaderDensity[] = ['compact', 'balanced', 'relaxed']
-  const idx = densities.indexOf(readerDensity.value)
-  readerDensity.value = densities[(idx + 1) % densities.length]
-  void persistReaderPreference(READER_DENSITY_SETTING_KEY, readerDensity.value)
 }
 
 function isReaderFontSize(value: string | null): value is ReaderFontSize {
@@ -1985,6 +2023,7 @@ async function initReader() {
     rendition.hooks.content.register((contents: any) => {
       applyInlineThemeOverride(contents)
       attachContentInteraction(contents)
+      syncTransientWordHighlights()
     })
     rendition.on('relocated', handleRelocated)
     rendition.on('selected', handleSelected)
@@ -2018,24 +2057,11 @@ async function openChapter(item: TocNode) {
   currentChapter.value = item.label
 }
 
-function prevPage() {
-  removeInlineSentenceTranslation()
-  clearSelection()
-  rendition?.prev?.()
-}
-
-function nextPage() {
-  removeInlineSentenceTranslation()
-  clearSelection()
-  rendition?.next?.()
-}
-
 onMounted(() => {
   document.documentElement.classList.add('book-reader-active')
   void initReader()
   readerShellRef.value?.addEventListener('wheel', handleReaderWheel, { passive: false })
-  getShellScrollContainer().addEventListener('scroll', scheduleQuickLookupPanelPositionUpdate, { passive: true })
-  getShellScrollContainer().addEventListener('scroll', updateToolbarVisibility, { passive: true })
+  getShellScrollContainer().addEventListener('scroll', handleShellScroll, { passive: true })
   window.addEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
   window.addEventListener('resize', updateToolbarVisibility)
 })
@@ -2049,8 +2075,7 @@ onActivated(() => {
 onUnmounted(() => {
   document.documentElement.classList.remove('book-reader-active')
   readerShellRef.value?.removeEventListener('wheel', handleReaderWheel)
-  getShellScrollContainer().removeEventListener('scroll', scheduleQuickLookupPanelPositionUpdate)
-  getShellScrollContainer().removeEventListener('scroll', updateToolbarVisibility)
+  getShellScrollContainer().removeEventListener('scroll', handleShellScroll)
   window.removeEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
   window.removeEventListener('resize', updateToolbarVisibility)
   shellScrollContainer = null
@@ -2095,13 +2120,15 @@ watch(
 )
 
 watch(
-  () => [quickLookupVisible.value, quickLookupSelectedText.value] as const,
+  () => [selection.value.text, selection.value.type, quickLookupVisible.value, quickLookupType.value, quickLookupSelectedText.value] as const,
   () => {
     if (!quickLookupVisible.value) {
       quickLookupPanelPosition.value = null
-      return
     }
-    nextTick(() => scheduleQuickLookupPanelPositionUpdate())
+    nextTick(() => {
+      if (quickLookupVisible.value) scheduleQuickLookupPanelPositionUpdate()
+      syncTransientWordHighlights()
+    })
   },
 )
 
@@ -2149,18 +2176,10 @@ watch(readerWidth, async () => {
         <div class="reader-actions reader-actions--toc">
           <button class="header-btn" @click="emit('close')">← 书架</button>
           <button class="header-btn" @click="showToc = false">隐藏</button>
-          <button class="header-btn" @click="prevPage">上一页</button>
-          <button class="header-btn primary" @click="nextPage">下一页</button>
         </div>
         <div class="toc-display-actions">
           <button class="header-btn reader-display-btn" @click="cycleFontSize" :title="'字号: ' + bookReaderFontSizeLabel[fontSize]">
             字号 {{ bookReaderFontSizeLabel[fontSize] }}
-          </button>
-          <button class="header-btn reader-display-btn" @click="cycleReaderWidth" :title="'正文宽度: ' + bookReaderWidthLabel[readerWidth]">
-            宽度 {{ bookReaderWidthLabel[readerWidth] }}
-          </button>
-          <button class="header-btn reader-display-btn" @click="cycleReaderDensity" :title="'正文比例: ' + bookReaderDensityLabel[readerDensity]">
-            比例 {{ bookReaderDensityLabel[readerDensity] }}
           </button>
         </div>
         <div class="toc-book-meta">
@@ -2271,6 +2290,8 @@ watch(readerWidth, async () => {
       :error="quickLookupError"
       :deep-error="quickLookupDeepError"
       :word-pos="quickLookupWordPos"
+      :phonetic="quickLookupPhonetic"
+      :used-context="quickLookupUsedContext"
       :meaning="quickLookupMeaning"
       :base-meaning="quickLookupBaseMeaning"
       :other-meanings="quickLookupOtherMeanings"

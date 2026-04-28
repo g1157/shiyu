@@ -15,7 +15,7 @@
 
 .reading-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #007AFF, #409CFF, #7ABAFF);
+  background: linear-gradient(90deg, var(--c-primary), #409CFF, #7ABAFF);
   transition: width 0.15s ease-out;
   border-radius: 0 2px 2px 0;
 }
@@ -31,11 +31,10 @@
   align-items: center;
   gap: 12px;
   padding: 0 20px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  background: var(--c-overlay-bg-strong);
+  border-bottom: 1px solid var(--c-overlay-border);
   z-index: 999;
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--c-shadow-md);
 }
 
 .floating-back-btn {
@@ -53,7 +52,7 @@
   flex-shrink: 0;
 }
 
-.floating-back-btn:hover { background: var(--c-border-light, #f1f5f9); color: #007AFF; }
+.floating-back-btn:hover { background: var(--c-hover-bg); color: var(--c-primary); }
 
 .floating-title {
   flex: 1;
@@ -117,8 +116,7 @@
   padding: 7px 16px;
   border: 1px solid var(--c-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
+  background: var(--c-surface-1);
   color: var(--c-text-lighter);
   font-size: 0.88rem;
   cursor: pointer;
@@ -126,7 +124,7 @@
   transition: all 0.2s;
 }
 
-.back-btn:hover { border-color: #007AFF; color: #007AFF; background: rgba(0, 122, 255, 0.04); }
+.back-btn:hover { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-light); }
 
 .reader-title-area {
   position: relative;
@@ -135,7 +133,7 @@
 .title-decoration {
   width: 48px;
   height: 4px;
-  background: linear-gradient(90deg, #007AFF, #409CFF);
+  background: linear-gradient(90deg, var(--c-primary), #409CFF);
   border-radius: 2px;
   margin-bottom: 1.2rem;
 }
@@ -171,15 +169,15 @@
 .meta-chip svg { flex-shrink: 0; }
 
 .meta-chip.author {
-  color: #6366f1;
-  background: #eef2ff;
-  border-color: #c7d2fe;
+  color: var(--c-primary-dark);
+  background: var(--c-primary-light);
+  border-color: var(--c-accent-border);
 }
 
 .meta-chip.category {
-  color: #0369a1;
-  background: linear-gradient(135deg, var(--c-bg-lighter), #e0f2fe);
-  border-color: #bae6fd;
+  color: var(--c-primary-dark);
+  background: var(--c-primary-light);
+  border-color: var(--c-accent-border);
   font-weight: 600;
 }
 
@@ -211,7 +209,7 @@
   white-space: nowrap;
 }
 
-.tool-btn:hover { border-color: var(--c-primary); color: var(--c-primary); background: rgba(0, 122, 255, 0.04); }
+.tool-btn:hover { border-color: var(--c-primary); color: var(--c-primary); background: var(--c-primary-light); }
 
 .tool-label { font-weight: 600; }
 
@@ -349,8 +347,8 @@
 }
 
 .annotation-toggle-btn.active {
-  color: #007AFF;
-  border-color: #007AFF;
+  color: var(--c-primary);
+  border-color: var(--c-primary);
   background: rgba(0, 122, 255, 0.05);
 }
 
@@ -387,8 +385,7 @@
   padding: 10px 24px;
   border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
+  background: var(--c-surface-1);
   color: var(--c-text-lighter);
   font-size: 0.9rem;
   font-weight: 600;
@@ -397,9 +394,9 @@
 }
 
 .back-to-list-btn:hover {
-  border-color: #007AFF;
-  color: #007AFF;
-  background: rgba(0, 122, 255, 0.04);
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  background: var(--c-primary-light);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 122, 255, 0.12);
 }
@@ -463,17 +460,15 @@
   position: relative;
   width: 42px;
   height: 42px;
-  border: none;
+  border: 1px solid var(--c-border);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--c-surface-1);
   color: var(--c-text-lighter);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--c-shadow-md);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   /* 入场动画 */
   animation: fab-pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
@@ -497,9 +492,9 @@
 
 .fab-btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--c-shadow-lg);
   color: var(--c-text);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--c-hover-bg);
 }
 
 .fab-btn:active {
@@ -549,7 +544,7 @@
 
 /* 主色按钮（回到顶部） */
 .fab-btn.fab-primary {
-  background: linear-gradient(135deg, #007AFF, #409CFF);
+  background: linear-gradient(135deg, var(--c-primary), #409CFF);
   color: #fff;
   box-shadow: 0 4px 16px rgba(0, 122, 255, 0.35);
 }

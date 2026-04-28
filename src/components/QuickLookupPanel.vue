@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, type CSSProperties } from 'vue'
 import { sanitizeParsedSentenceHtml } from '../utils/sanitizeHtml'
+import { useTTS } from '../composables/useTTS'
 
 interface QuickLookupPosition {
   top: number
@@ -30,6 +31,8 @@ const props = defineProps<{
   error?: string
   deepError?: string
   wordPos?: string
+  phonetic?: string
+  usedContext?: boolean
   meaning?: string
   baseMeaning?: string
   otherMeanings?: string[]
@@ -46,6 +49,8 @@ const emit = defineEmits<{
   deepen: []
   inline: []
 }>()
+
+const { isSpeaking, isLoading, speakingKey, loadingKey, speak } = useTTS()
 
 const title = computed(() => (props.type === 'word' ? '快速查词' : '快速查句'))
 const subtitle = computed(() => {
@@ -85,6 +90,12 @@ const hasExtendedWordMeanings = computed(() =>
   Boolean(props.baseMeaning?.trim()) || Boolean(props.otherMeanings?.length),
 )
 const safeParsedHtml = computed(() => sanitizeParsedSentenceHtml(props.parsedHtml || ''))
+const wordTtsKey = computed(() => `${props.selectedText.trim()}__-10%`)
+const wordIsLoading = computed(() => isLoading.value && loadingKey.value === wordTtsKey.value)
+const wordIsSpeaking = computed(() => isSpeaking.value && speakingKey.value === wordTtsKey.value)
+const canRetryWithContext = computed(() =>
+  props.type === 'word' && Boolean(normalizedContext.value) && !props.usedContext && !props.loading && !props.saving,
+)
 const canSave = computed(() => hasResult.value && !props.loading && !props.saving)
 const panelWidth = computed(() => {
   if (typeof window === 'undefined') return 380
@@ -223,7 +234,26 @@ const panelStyle = computed<CSSProperties>(() => {
         <div class="qlp-body">
           <section class="qlp-card">
             <div class="qlp-label">{{ type === 'word' ? '当前词语' : '当前句子' }}</div>
-            <div class="qlp-selected">{{ selectedText }}</div>
+            <div class="qlp-selected-row">
+              <div class="qlp-selected">{{ selectedText }}</div>
+              <button
+                v-if="type === 'word'"
+                class="qlp-speak-btn"
+                :class="{ 'qlp-speak-btn--active': wordIsSpeaking, 'qlp-speak-btn--loading': wordIsLoading }"
+                :disabled="isLoading"
+                title="朗读发音"
+                @click="speak(selectedText, '-10%')"
+              >
+                <svg v-if="!wordIsLoading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                </svg>
+                <svg v-else class="qlp-speak-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
+                </svg>
+              </button>
+            </div>
             <div v-if="type === 'word' && normalizedContext" class="qlp-context">
               <span class="qlp-context-label">语境</span>
               <span class="qlp-context-text">
@@ -254,6 +284,7 @@ const panelStyle = computed<CSSProperties>(() => {
             <section v-if="type === 'word' && meaning" class="qlp-card">
               <div class="qlp-label">当前语境义</div>
               <div class="qlp-meaning-row">
+                <span v-if="phonetic" class="qlp-chip qlp-chip--phonetic">{{ phonetic }}</span>
                 <span v-if="wordPos" class="qlp-chip">{{ wordPos }}</span>
                 <span class="qlp-meaning">{{ meaning }}</span>
               </div>
@@ -318,6 +349,14 @@ const panelStyle = computed<CSSProperties>(() => {
               @click="emit('inline')"
             >
               句下展开
+            </button>
+            <button
+              v-if="canRetryWithContext"
+              class="qlp-btn qlp-btn-secondary"
+              :disabled="loading || saving"
+              @click="emit('retry')"
+            >
+              结合语境重查
             </button>
             <button
               class="qlp-btn qlp-btn-secondary"
@@ -449,11 +488,55 @@ const panelStyle = computed<CSSProperties>(() => {
   letter-spacing: 0.03em;
 }
 
+.qlp-selected-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .qlp-selected {
+  min-width: 0;
   font-family: var(--font-serif);
   font-size: 15px;
   line-height: 1.8;
   color: var(--c-text);
+}
+
+.qlp-speak-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface-1);
+  color: var(--c-text-lighter);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.qlp-speak-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.qlp-speak-btn:hover,
+.qlp-speak-btn--active {
+  border-color: var(--c-primary);
+  background: var(--c-primary-light);
+  color: var(--c-primary);
+}
+
+.qlp-speak-btn:disabled {
+  opacity: 0.58;
+  cursor: wait;
+}
+
+.qlp-speak-spinner {
+  animation: qlp-spin 0.8s linear infinite;
 }
 
 .qlp-context {
@@ -572,10 +655,15 @@ const panelStyle = computed<CSSProperties>(() => {
   height: 24px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(59, 130, 246, 0.12);
-  color: #2563eb;
+  background: var(--c-primary-light);
+  color: var(--c-primary-dark);
   font-size: 12px;
   font-weight: 700;
+}
+
+.qlp-chip--phonetic {
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
 }
 
 .qlp-meaning,
@@ -603,21 +691,21 @@ const panelStyle = computed<CSSProperties>(() => {
 }
 
 .qlp-error {
-  border-color: rgba(248, 113, 113, 0.28);
-  background: rgba(254, 242, 242, 0.95);
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .qlp-error-title {
   font-size: 13px;
   font-weight: 700;
-  color: #dc2626;
+  color: var(--c-danger);
 }
 
 .qlp-error-body {
   margin-top: 6px;
   font-size: 13px;
   line-height: 1.65;
-  color: #7f1d1d;
+  color: var(--c-text);
   white-space: pre-wrap;
   word-break: break-word;
 }

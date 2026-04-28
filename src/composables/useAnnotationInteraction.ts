@@ -107,6 +107,7 @@ export function useAnnotationInteraction(
   const quickLookupSelectedText = ref('')
   const quickLookupContextText = ref('')
   const quickLookupWordPos = ref('')
+  const quickLookupPhonetic = ref('')
   const quickLookupMeaning = ref('')
   const quickLookupBaseMeaning = ref('')
   const quickLookupOtherMeanings = ref<string[]>([])
@@ -118,6 +119,7 @@ export function useAnnotationInteraction(
   const quickLookupSaving = ref(false)
   const quickLookupError = ref('')
   const quickLookupDeepError = ref('')
+  const quickLookupUsedContext = ref(false)
   const quickLookupAnchor = ref<QuickLookupAnchorPosition | null>(null)
   const quickLookupRange = ref<Range | null>(null)
   let tooltipHideTimeout: ReturnType<typeof setTimeout> | null = null
@@ -154,6 +156,7 @@ export function useAnnotationInteraction(
 
   function resetQuickLookupData() {
     quickLookupWordPos.value = ''
+    quickLookupPhonetic.value = ''
     quickLookupMeaning.value = ''
     quickLookupBaseMeaning.value = ''
     quickLookupOtherMeanings.value = []
@@ -166,6 +169,9 @@ export function useAnnotationInteraction(
 
   function buildWordMeaningText() {
     const segments: string[] = []
+    if (quickLookupPhonetic.value.trim()) {
+      segments.push(`音标：${quickLookupPhonetic.value.trim()}`)
+    }
     if (quickLookupWordPos.value.trim()) {
       segments.push(`词性：${quickLookupWordPos.value.trim()}`)
     }
@@ -175,11 +181,11 @@ export function useAnnotationInteraction(
     return segments.join(' - ') || quickLookupMeaning.value.trim()
   }
 
-  async function runQuickLookup(type: HighlightType, text: string, contextText: string, requestId: number) {
+  async function runQuickLookup(type: HighlightType, text: string, contextText: string, requestId: number, useContext = false) {
     try {
       const req = type === 'word'
         ? {
-            text: contextText ? `单词：${text}\n语境：${contextText}` : text,
+            text: useContext && contextText ? `单词：${text}\n语境：${contextText}` : text,
             prompt_type: 'word_quick' as const,
           }
         : {
@@ -196,7 +202,9 @@ export function useAnnotationInteraction(
 
       const parsed = parseModelResult(content)
       if (type === 'word') {
+        quickLookupUsedContext.value = useContext
         quickLookupWordPos.value = String(parsed?.pos || '').trim()
+        quickLookupPhonetic.value = String(parsed?.phonetic || parsed?.uk || parsed?.us || '').trim()
         quickLookupMeaning.value = String(parsed?.meaning || parsed?.zh || content).trim()
         quickLookupBaseMeaning.value = String(parsed?.base_meaning || parsed?.core_meaning || '').trim()
         quickLookupOtherMeanings.value = Array.isArray(parsed?.other_meanings)
@@ -245,10 +253,11 @@ export function useAnnotationInteraction(
     quickLookupDeepLoading.value = false
     quickLookupSaving.value = false
     resetQuickLookupData()
+    quickLookupUsedContext.value = false
     clearSelection()
 
     const requestId = ++quickLookupRequestId
-    void runQuickLookup(type, selectedText, contextText, requestId)
+    void runQuickLookup(type, selectedText, contextText, requestId, false)
   }
 
   // Methods
@@ -291,6 +300,7 @@ export function useAnnotationInteraction(
     quickLookupSaving.value = false
     quickLookupSelectedText.value = ''
     quickLookupContextText.value = ''
+    quickLookupUsedContext.value = false
     quickLookupAnchor.value = null
     quickLookupRange.value = null
     resetQuickLookupData()
@@ -302,12 +312,15 @@ export function useAnnotationInteraction(
     quickLookupDeepLoading.value = false
     quickLookupSaving.value = false
     resetQuickLookupData()
+    const useContext = quickLookupType.value === 'word' && Boolean(quickLookupContextText.value.trim())
+    quickLookupUsedContext.value = useContext
     const requestId = ++quickLookupRequestId
     void runQuickLookup(
       quickLookupType.value,
       quickLookupSelectedText.value,
       quickLookupContextText.value,
       requestId,
+      useContext,
     )
   }
 
@@ -635,6 +648,7 @@ export function useAnnotationInteraction(
     quickLookupSelectedText,
     quickLookupContextText,
     quickLookupWordPos,
+    quickLookupPhonetic,
     quickLookupMeaning,
     quickLookupBaseMeaning,
     quickLookupOtherMeanings,
@@ -646,6 +660,7 @@ export function useAnnotationInteraction(
     quickLookupSaving,
     quickLookupError,
     quickLookupDeepError,
+    quickLookupUsedContext,
     // Methods
     handleAddWord,
     handleAddSentence,

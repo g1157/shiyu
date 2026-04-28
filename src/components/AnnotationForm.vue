@@ -338,7 +338,8 @@ onUnmounted(() => {
   border-radius: 16px;
   width: 90%;
   max-width: 520px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0,0,0,0.05);
+  border: 1px solid var(--c-border);
+  box-shadow: var(--c-shadow-lg);
   animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
 }
@@ -419,10 +420,10 @@ onUnmounted(() => {
   font-family: inherit;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
-.input-group textarea:focus { 
-  outline: none; 
-  border-color: #007AFF; 
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1); 
+.input-group textarea:focus {
+  outline: none;
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px var(--c-primary-light);
 }
 
 .sentence-field input {
@@ -439,10 +440,10 @@ onUnmounted(() => {
   font-family: inherit;
   box-shadow: 0 1px 2px rgba(0,0,0,0.02);
 }
-.sentence-field input:focus { 
-  outline: none; 
-  border-color: #007AFF; 
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1); 
+.sentence-field input:focus {
+  outline: none;
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px var(--c-primary-light);
 }
 
 .sentence-fields { display: grid; gap: 16px; }
@@ -458,7 +459,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--c-border);
 }
 .structure-box .box-header { color: #8b5cf6; }
-.meaning-box .box-header { color: #007AFF; }
+.meaning-box .box-header { color: var(--c-primary); }
 .sentence-field { display: flex; flex-direction: column; gap: 6px; }
 .sentence-box .sentence-field + .sentence-field { margin-top: 12px; }
 .sub-label { font-size: 12px; color: var(--c-text-lighter); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -484,13 +485,13 @@ onUnmounted(() => {
 .btn-cancel { background: var(--c-border); color: var(--c-text-lighter); }
 .btn-cancel:hover { background: var(--c-border); color: var(--c-text); }
 .btn-save {
-  background: linear-gradient(135deg, #007AFF, #409CFF);
+  background: var(--c-primary);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(95,186,125,0.25);
+  box-shadow: none;
 }
 .btn-save:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(95,186,125,0.35);
+  background: var(--c-primary-dark);
 }
 .btn-save:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: none; }
 
@@ -499,17 +500,17 @@ onUnmounted(() => {
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
-  background: var(--c-bg-lighter);
-  color: #007AFF;
-  border: 1px solid #bae6fd;
+  background: var(--c-primary-light);
+  color: var(--c-primary-dark);
+  border: 1px solid var(--c-accent-border);
   transition: all 0.2s;
 }
-.btn-ai:hover:not(:disabled) { 
-  background: #e0f2fe; 
-  border-color: #7dd3fc;
+.btn-ai:hover:not(:disabled) {
+  background: var(--c-selected-bg);
+  border-color: var(--c-primary);
 }
 .btn-ai:disabled { opacity: 0.6; cursor: not-allowed; }
-.ai-error { margin-top: 12px; font-size: 13px; color: #ef4444; background: #fef2f2; padding: 8px 12px; border-radius: 6px; border: 1px solid #fecaca; }
+.ai-error { margin-top: 12px; font-size: 13px; color: var(--c-danger); background: rgba(239, 68, 68, 0.1); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.28); }
 
 /* Loading shimmer */
 .ai-loading { display: grid; gap: 10px; margin-bottom: 16px; }
@@ -525,8 +526,8 @@ onUnmounted(() => {
 
 /* Parsed structure panel */
 .parsed-structure-panel { margin-bottom: 16px; background: var(--c-bg-lighter); border: 1px solid var(--c-border); border-radius: 12px; overflow: hidden; }
-.parsed-header { display: flex; align-items: center; padding: 10px 16px; background: linear-gradient(135deg, #faf5ff, #ede9fe); border-bottom: 1px solid var(--c-border); }
-.parsed-label { font-size: 14px; font-weight: 700; color: #7c3aed; }
+.parsed-header { display: flex; align-items: center; padding: 10px 16px; background: var(--c-primary-light); border-bottom: 1px solid var(--c-border); }
+.parsed-label { font-size: 14px; font-weight: 700; color: var(--c-primary-dark); }
 .parsed-content { padding: 14px 16px; font-size: 15px; line-height: 2.2; color: var(--c-text); word-break: break-word; font-family: var(--font-serif); }
 .parsed-note { padding: 8px 16px 12px; font-size: 13px; color: var(--c-text-lighter); font-style: italic; border-top: 1px solid var(--c-border-light, #f1f5f9); }
 </style>

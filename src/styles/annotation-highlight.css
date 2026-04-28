@@ -51,6 +51,55 @@
 }
 
 /* ═══════════════════════════════════════════════════
+   当前查词临时高亮 — 蓝色描边
+   ═══════════════════════════════════════════════════ */
+
+.reader-body mark.active-lookup-word,
+.reader-body mark.active-lookup-word-subtle,
+body mark.active-lookup-word,
+body mark.active-lookup-word-subtle {
+  background: rgba(37, 99, 235, 0.04) !important;
+  color: inherit !important;
+  padding: 0 2px !important;
+  margin: 0 -2px;
+  border-radius: 5px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  text-decoration: none !important;
+  box-shadow: inset 0 -2px 0 rgba(37, 99, 235, 0.9), 0 0 0 1px rgba(37, 99, 235, 0.72);
+}
+
+.reader-body mark.active-lookup-word,
+body mark.active-lookup-word {
+  box-shadow: inset 0 -3px 0 rgba(37, 99, 235, 0.95), 0 0 0 2px rgba(37, 99, 235, 0.78);
+}
+
+.reader-body mark.active-lookup-word-subtle,
+body mark.active-lookup-word-subtle {
+  background: transparent !important;
+  box-shadow: inset 0 -2px 0 rgba(37, 99, 235, 0.68), 0 0 0 1px rgba(37, 99, 235, 0.34);
+}
+
+html.dark .reader-body mark.active-lookup-word,
+html.dark .reader-body mark.active-lookup-word-subtle,
+html.dark body mark.active-lookup-word,
+html.dark body mark.active-lookup-word-subtle {
+  background: rgba(96, 165, 250, 0.08) !important;
+  box-shadow: inset 0 -2px 0 rgba(147, 197, 253, 0.92), 0 0 0 1px rgba(147, 197, 253, 0.72);
+}
+
+html.dark .reader-body mark.active-lookup-word,
+html.dark body mark.active-lookup-word {
+  box-shadow: inset 0 -3px 0 rgba(147, 197, 253, 0.96), 0 0 0 2px rgba(147, 197, 253, 0.82);
+}
+
+html.dark .reader-body mark.active-lookup-word-subtle,
+html.dark body mark.active-lookup-word-subtle {
+  background: transparent !important;
+  box-shadow: inset 0 -2px 0 rgba(147, 197, 253, 0.72), 0 0 0 1px rgba(147, 197, 253, 0.38);
+}
+
+/* ═══════════════════════════════════════════════════
    句子标注 — 淡蓝 Light Blue
    ═══════════════════════════════════════════════════ */
 

@@ -238,7 +238,7 @@
 }
 
 /* ⚠️ 关键：:not() 排除标注类名 */
-.reader-body mark:not(.annotated-word):not(.annotated-word-subtle):not(.annotated-sentence):not(.annotated-sentence-subtle) {
+.reader-body mark:not(.annotated-word):not(.annotated-word-subtle):not(.annotated-sentence):not(.annotated-sentence-subtle):not(.active-lookup-word):not(.active-lookup-word-subtle) {
   background: linear-gradient(135deg, #fef3c7, #fde68a);
   padding: 1px 4px;
   border-radius: 3px;

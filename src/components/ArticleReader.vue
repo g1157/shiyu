@@ -15,6 +15,7 @@ import {
   resolveInlineSentenceAnchor,
 } from '../utils/inlineSentenceTranslation'
 import { sanitizeRichHtml } from '../utils/sanitizeHtml'
+import { clearTransientWordHighlights, highlightTransientWord } from '../utils/transientWordHighlight'
 
 import SelectionPopover from './SelectionPopover.vue'
 import AnnotationForm from './AnnotationForm.vue'
@@ -178,6 +179,8 @@ const {
   quickLookupSelectedText,
   quickLookupContextText,
   quickLookupWordPos,
+  quickLookupPhonetic,
+  quickLookupUsedContext,
   quickLookupMeaning,
   quickLookupBaseMeaning,
   quickLookupOtherMeanings,
@@ -315,18 +318,6 @@ const readerWidthMap = {
   wide: '820px',
 }
 
-const readerWidthLabel = {
-  narrow: '窄',
-  medium: '中',
-  wide: '宽',
-}
-
-const readerWidthTitle = {
-  narrow: '窄栏',
-  medium: '标准',
-  wide: '宽栏',
-}
-
 const readerDensityLineHeightMap = {
   compact: '1.72',
   balanced: '1.9',
@@ -337,18 +328,6 @@ const readerDensityImageWidthMap = {
   compact: '68%',
   balanced: '75%',
   relaxed: '82%',
-}
-
-const readerDensityLabel = {
-  compact: '紧',
-  balanced: '中',
-  relaxed: '舒',
-}
-
-const readerDensityTitle = {
-  compact: '紧凑',
-  balanced: '均衡',
-  relaxed: '舒展',
 }
 
 const readerViewStyle = computed(() => ({
@@ -474,20 +453,6 @@ function adjustFontSize(step: 1 | -1) {
   setFontSize(sizes[nextIdx])
 }
 
-function cycleReaderWidth() {
-  const widths: ReaderWidth[] = ['narrow', 'medium', 'wide']
-  const idx = widths.indexOf(readerWidth.value)
-  readerWidth.value = widths[(idx + 1) % widths.length]
-  void persistReaderPreference(READER_WIDTH_SETTING_KEY, readerWidth.value)
-}
-
-function cycleReaderDensity() {
-  const densities: ReaderDensity[] = ['compact', 'balanced', 'relaxed']
-  const idx = densities.indexOf(readerDensity.value)
-  readerDensity.value = densities[(idx + 1) % densities.length]
-  void persistReaderPreference(READER_DENSITY_SETTING_KEY, readerDensity.value)
-}
-
 function isReaderFontSize(value: string | null): value is ReaderFontSize {
   return value === 'small' || value === 'medium' || value === 'large'
 }
@@ -576,7 +541,15 @@ function getScrollContainer(): HTMLElement {
   return scrollContainer || document.documentElement
 }
 
+function dismissSelectionOverlaysOnScroll() {
+  if (!popoverPosition.value.visible && !quickLookupVisible.value && !selection.value.text) return
+  closeQuickLookup()
+  quickLookupPanelPosition.value = null
+  clearSelection()
+}
+
 function handleScroll() {
+  dismissSelectionOverlaysOnScroll()
   if (scrollRafId !== null) return
   scrollRafId = requestAnimationFrame(() => {
     scrollRafId = null
@@ -585,7 +558,6 @@ function handleScroll() {
     const scrollHeight = el.scrollHeight - el.clientHeight
     readingProgress.value = scrollHeight > 0 ? Math.min((scrollTop / scrollHeight) * 100, 100) : 0
     showFloatingHeader.value = scrollTop > 200
-    updateQuickLookupPanelPosition()
     updateActiveToc()
   })
 }
@@ -668,19 +640,40 @@ onActivated(() => {
   })
 })
 
+function currentTransientHighlightWord() {
+  if (quickLookupVisible.value && quickLookupType.value === 'word') {
+    return quickLookupSelectedText.value
+  }
+  if (selection.value.type === 'word') {
+    return selection.value.text
+  }
+  return ''
+}
+
+function syncTransientWordHighlights() {
+  const word = currentTransientHighlightWord()
+  if (word) {
+    highlightTransientWord(readerBodyRef.value, word)
+  } else {
+    clearTransientWordHighlights(readerBodyRef.value)
+  }
+}
+
 // Watch for article change (e.g., route navigation while reader is open)
 watch(() => props.article.id, () => {
   initReader()
 })
 
 watch(
-  () => [quickLookupVisible.value, quickLookupSelectedText.value] as const,
+  () => [selection.value.text, selection.value.type, quickLookupVisible.value, quickLookupType.value, quickLookupSelectedText.value] as const,
   () => {
     if (!quickLookupVisible.value) {
       quickLookupPanelPosition.value = null
-      return
     }
-    nextTick(() => updateQuickLookupPanelPosition())
+    nextTick(() => {
+      if (quickLookupVisible.value) updateQuickLookupPanelPosition()
+      syncTransientWordHighlights()
+    })
   },
 )
 
@@ -749,21 +742,6 @@ watch(() => props.highlightId, (newId) => {
               <path d="M12 4v16"/>
             </svg>
             <span class="tool-label">{{ fontSizeLabel[fontSize] }}</span>
-          </button>
-          <button class="tool-btn" @click="cycleReaderWidth" :title="'正文宽度: ' + readerWidthTitle[readerWidth]">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="4" y="6" width="16" height="12" rx="2"/>
-              <path d="M9 9v6M15 9v6"/>
-            </svg>
-            <span class="tool-label">{{ readerWidthLabel[readerWidth] }}</span>
-          </button>
-          <button class="tool-btn" @click="cycleReaderDensity" :title="'正文比例: ' + readerDensityTitle[readerDensity]">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 7h14"/>
-              <path d="M5 12h14"/>
-              <path d="M5 17h14"/>
-            </svg>
-            <span class="tool-label">{{ readerDensityLabel[readerDensity] }}</span>
           </button>
           <button
             v-if="articleToc.length"
@@ -836,21 +814,6 @@ watch(() => props.highlightId, (newId) => {
           <path d="M12 4v16"/>
         </svg>
         <span class="tool-label">字号 {{ fontSizeLabel[fontSize] }}</span>
-      </button>
-      <button class="tool-btn reader-setting-btn" @click="cycleReaderWidth" :title="'正文宽度: ' + readerWidthTitle[readerWidth]">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="4" y="6" width="16" height="12" rx="2"/>
-          <path d="M9 9v6M15 9v6"/>
-        </svg>
-        <span class="tool-label">宽度 {{ readerWidthTitle[readerWidth] }}</span>
-      </button>
-      <button class="tool-btn reader-setting-btn" @click="cycleReaderDensity" :title="'正文比例: ' + readerDensityTitle[readerDensity]">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 7h14"/>
-          <path d="M5 12h14"/>
-          <path d="M5 17h14"/>
-        </svg>
-        <span class="tool-label">比例 {{ readerDensityTitle[readerDensity] }}</span>
       </button>
       <button
         v-if="articleToc.length"
@@ -1025,6 +988,8 @@ watch(() => props.highlightId, (newId) => {
       :error="quickLookupError"
       :deep-error="quickLookupDeepError"
       :word-pos="quickLookupWordPos"
+      :phonetic="quickLookupPhonetic"
+      :used-context="quickLookupUsedContext"
       :meaning="quickLookupMeaning"
       :base-meaning="quickLookupBaseMeaning"
       :other-meanings="quickLookupOtherMeanings"

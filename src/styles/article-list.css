@@ -52,9 +52,8 @@
 .stat-label { font-size: 0.85rem; color: var(--c-text-lighter); }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-border);
   border-radius: 14px;
 }
 
@@ -77,7 +76,7 @@
   transition: border-color 0.2s;
 }
 
-.form-input:focus { border-color: #007AFF; }
+.form-input:focus { border-color: var(--c-primary); }
 .form-input.short { max-width: 160px; }
 
 .form-textarea {
@@ -93,7 +92,7 @@
   box-sizing: border-box;
 }
 
-.form-textarea:focus { border-color: #007AFF; }
+.form-textarea:focus { border-color: var(--c-primary); }
 
 .toolbar {
   display: flex;
@@ -153,7 +152,7 @@
 .toolbar-btn:hover {
   border-color: var(--c-primary);
   color: var(--c-primary);
-  background: rgba(0, 122, 255, 0.04);
+  background: var(--c-primary-light);
 }
 
 .toolbar-btn:disabled {
@@ -162,13 +161,13 @@
 }
 
 .toolbar-btn.danger {
-  color: #dc2626;
-  border-color: #fecaca;
+  color: var(--c-danger);
+  border-color: rgba(239, 68, 68, 0.28);
 }
 
 .toolbar-btn.danger:hover {
-  background: #fef2f2;
-  border-color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--c-danger);
 }
 
 .article-grid {
@@ -186,8 +185,8 @@
 }
 
 .article-card.selected {
-  border-color: #3b82f6;
-  background: #eff6ff;
+  border-color: var(--c-primary);
+  background: var(--c-selected-bg);
 }
 
 .article-checkbox {
@@ -204,8 +203,8 @@
 
 .article-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 122, 255, 0.12);
-  border-color: #bae6fd;
+  box-shadow: var(--c-shadow-md);
+  border-color: var(--c-border-strong);
 }
 
 .card-body { flex: 1; padding: 1rem 1.2rem; min-width: 0; }
@@ -247,9 +246,9 @@
 }
 
 .meta-tag.category {
-  background: linear-gradient(135deg, var(--c-bg-lighter), #e0f2fe);
-  border-color: #bae6fd;
-  color: #0369a1;
+  background: var(--c-primary-light);
+  border-color: var(--c-accent-border);
+  color: var(--c-primary-dark);
   font-weight: 600;
 }
 
@@ -269,11 +268,11 @@
   flex-shrink: 0;
 }
 
-.delete-btn:hover { background: #fee2e2; color: #ef4444; }
+.delete-btn:hover { background: rgba(239, 68, 68, 0.1); color: var(--c-danger); }
 
 .card-action {
   padding: 1rem;
-  color: #007AFF;
+  color: var(--c-primary);
   font-weight: 600;
   font-size: 0.9rem;
   white-space: nowrap;
@@ -327,7 +326,7 @@
 .btn-sm:hover {
   border-color: var(--c-primary);
   color: var(--c-primary);
-  background: rgba(0, 122, 255, 0.04);
+  background: var(--c-primary-light);
 }
 
 .md-editor-wrap .form-textarea {
