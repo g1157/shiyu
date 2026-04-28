@@ -179,11 +179,24 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
     let chapter_path_clean = chapter_path.split('#').next().unwrap_or(chapter_path);
     let mut target_resource_id: Option<String> = None;
 
+    let chapter_path_normalized = normalize_epub_path(chapter_path_clean);
+    let chapter_file_name = Path::new(&chapter_path_normalized)
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+
     for (res_id, (res_path, _mime)) in resources_snapshot {
-        let res_path_str = res_path.to_string_lossy().to_string();
-        if res_path_str == chapter_path_clean
-            || res_path_str.ends_with(chapter_path_clean)
-            || chapter_path_clean.ends_with(&res_path_str)
+        let res_path_str = normalize_epub_path(&res_path.to_string_lossy());
+        let filename_match = !chapter_file_name.is_empty()
+            && res_path
+                .file_name()
+                .map(|value| value.to_string_lossy() == chapter_file_name)
+                .unwrap_or(false);
+
+        if res_path_str == chapter_path_normalized
+            || res_path_str.ends_with(&chapter_path_normalized)
+            || chapter_path_normalized.ends_with(&res_path_str)
+            || filename_match
         {
             target_resource_id = Some(res_id.clone());
             break;
@@ -247,7 +260,8 @@ fn extract_epub_chapter_internal<R: std::io::Read + std::io::Seek>(
             if !mime.starts_with("image/") {
                 continue;
             }
-            let res_path_str = res_path.to_string_lossy().to_string();
+            let res_path_str = normalize_epub_path(&res_path.to_string_lossy());
+            let resolved_str = normalize_epub_path(&resolved_str);
             let filename_match = res_path
                 .file_name()
                 .and_then(|f| resolved.file_name().map(|rf| f == rf))
@@ -393,6 +407,12 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
     components.iter().collect()
+}
+
+fn normalize_epub_path(value: &str) -> String {
+    normalize_path(Path::new(value.trim_start_matches('/')))
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn extract_image_paths(html: &str) -> Vec<String> {

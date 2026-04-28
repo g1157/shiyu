@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onActivated, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { splitSentenceExplanation } from '../utils/sentenceExplanation'
 import {
   deleteSentence,
   getEbooks,
   updateSentenceReview,
-  type EbookItem,
   type SentenceItem,
 } from '../services/api'
 import { useTTS } from '../composables/useTTS'
@@ -15,6 +15,7 @@ import { formatDate } from '../utils/format'
 import { useAppStore } from '../stores/appStore'
 import { useGlobalToast } from '../composables/useGlobalToast'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.vue'
+import { getDocumentRef, resolveDocumentSourceSummary } from '../utils/documentSource'
 
 const { isSpeaking, isLoading, speakingKey, loadingKey, speak } = useTTS()
 const toast = useGlobalToast()
@@ -23,7 +24,7 @@ const route = useRoute()
 const router = useRouter()
 
 const appStore = useAppStore()
-const ebooks = ref<EbookItem[]>([])
+const { ebooks } = storeToRefs(appStore)
 
 const items = computed(() => appStore.sentences)
 const loading = ref(true)
@@ -101,7 +102,8 @@ async function loadSentences() {
 
 async function loadEbooks() {
   try {
-    ebooks.value = await getEbooks()
+    const latest = await getEbooks()
+    appStore.setEbooks(latest)
   } catch (e) {
     console.error('加载书架标题失败:', e)
   }
@@ -172,12 +174,23 @@ async function resolveArticleRoute(sourcePath: string): Promise<{ path: '/articl
 }
 
 async function goToSource(sentence: SentenceItem) {
-  if (sentence.ebook_id && sentence.ebook_cfi) {
-    const exists = ebooks.value.some((item) => item.id === sentence.ebook_id)
+  const ref = getDocumentRef(sentence)
+  if (!ref) {
+    toast.warning('该句子未关联文章或图书，无法跳转')
+    return
+  }
+
+  if (ref.kind === 'ebook') {
+    if (!sentence.ebook_cfi) {
+      toast.warning('该句子缺少图书定位信息，暂时无法跳转到原文位置')
+      return
+    }
+
+    const exists = ebooks.value.some((item) => item.id === ref.id)
     if (!exists) {
       await loadEbooks()
     }
-    if (!ebooks.value.some((item) => item.id === sentence.ebook_id)) {
+    if (!ebooks.value.some((item) => item.id === ref.id)) {
       toast.warning('未找到关联图书，可能已从书架删除')
       return
     }
@@ -185,7 +198,7 @@ async function goToSource(sentence: SentenceItem) {
     void router.push({
       path: '/books',
       query: {
-        bookId: sentence.ebook_id,
+        bookId: ref.id,
         cfi: sentence.ebook_cfi,
         highlight: sentence.id,
         type: 'sentence',
@@ -194,12 +207,7 @@ async function goToSource(sentence: SentenceItem) {
     return
   }
 
-  if (!sentence.article_path) {
-    toast.warning('该句子未关联文章或图书，无法跳转')
-    return
-  }
-
-  const target = await resolveArticleRoute(sentence.article_path)
+  const target = await resolveArticleRoute(ref.id)
   if (!target) {
     toast.warning('未找到关联原文，可能已删除或来源不受支持')
     return
@@ -216,17 +224,12 @@ async function goToSource(sentence: SentenceItem) {
 }
 
 function getSourceTitle(sentence: SentenceItem): string {
-  if (sentence.ebook_id) {
-    const ebook = ebooks.value.find((item) => item.id === sentence.ebook_id)
-    if (ebook) return ebook.title
-    return '图书原文'
-  }
+  const summary = resolveDocumentSourceSummary(sentence, appStore.articles, ebooks.value)
+  if (summary?.label) return summary.label
 
-  const articlePath = sentence.article_path
-  if (!articlePath) return ''
-  const article = appStore.articles.find((a) => a.id === articlePath)
-  if (article) return article.title
-  return articlePath.length > 20 ? articlePath.substring(0, 20) + '...' : articlePath
+  const ref = getDocumentRef(sentence)
+  if (!ref) return ''
+  return ref.id.length > 20 ? ref.id.substring(0, 20) + '...' : ref.id
 }
 
 onMounted(async () => {
@@ -348,7 +351,7 @@ watch(
         <div class="sentence-footer">
           <div class="sentence-footer__left">
             <button
-              v-if="item.sentence.article_path || item.sentence.ebook_id"
+              v-if="getDocumentRef(item.sentence)"
               class="sentence-source-link"
               @click="goToSource(item.sentence)"
               :title="'来源：' + getSourceTitle(item.sentence)"
@@ -365,7 +368,7 @@ watch(
 
           <div class="sentence-actions">
             <button
-              v-if="item.sentence.article_path || item.sentence.ebook_id"
+              v-if="getDocumentRef(item.sentence)"
               class="action-btn"
               title="跳转原文"
               @click="goToSource(item.sentence)"
@@ -594,8 +597,10 @@ watch(
 .search-box input {
   width: 100%;
   padding: 10px 14px;
-  border: 1px solid var(--vp-c-divider, #ddd);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
+  background: var(--c-surface-1);
+  color: var(--c-text);
   font-size: 14px;
 }
 
@@ -606,10 +611,11 @@ watch(
 
 .sort-select {
   padding: 10px 14px;
-  border: 1px solid var(--vp-c-divider, #ddd);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
+  background: var(--c-surface-1);
+  color: var(--c-text);
   font-size: 14px;
-  background: var(--c-bg-light);
 }
 
 .export-btn {
@@ -635,7 +641,7 @@ watch(
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: var(--vp-c-text-2, #666);
+  color: var(--c-text-lighter);
 }
 
 .empty-icon {
@@ -651,20 +657,17 @@ watch(
 }
 
 .sentence-card {
-  background: rgba(246, 246, 247, 0.85);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-primary);
   border-radius: 10px;
   padding: 14px 16px;
-  border-left: 3px solid var(--c-primary);
-  transition: background 0.2s;
-  backdrop-filter: blur(8px);
-}
-
-:root.dark .sentence-card {
-  background: rgba(30, 30, 32, 0.85);
+  background: var(--c-surface-1);
+  transition: border-color 0.2s, background 0.2s;
 }
 
 .sentence-card:hover {
-  background: rgba(240, 240, 242, 0.95);
+  border-color: var(--c-border-strong);
+  background: var(--c-hover-bg);
 }
 
 @keyframes sentence-focus-pulse {
@@ -688,7 +691,7 @@ watch(
   gap: 0.5rem;
   font-size: 15px;
   line-height: 1.6;
-  color: var(--vp-c-text-1, #333);
+  color: var(--c-text);
   margin-bottom: 12px;
 }
 
@@ -755,14 +758,11 @@ watch(
 }
 
 .sentence-explanation {
-  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--c-border-light);
   border-radius: 6px;
   padding: 10px 12px;
   margin-bottom: 12px;
-}
-
-:root.dark .sentence-explanation {
-  background: rgba(40, 40, 42, 0.7);
+  background: var(--c-surface-2);
 }
 
 .explanation-label {
@@ -782,7 +782,7 @@ watch(
 .explanation-text {
   font-size: 13px;
   line-height: 1.5;
-  color: var(--vp-c-text-2, #666);
+  color: var(--c-text-lighter);
   white-space: pre-wrap;
 }
 
@@ -797,9 +797,9 @@ watch(
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--vp-c-text-3, #999);
+  color: var(--c-text-lighter);
   background: transparent;
-  border: 1px solid var(--vp-c-divider, var(--c-border));
+  border: 1px solid var(--c-border);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -825,7 +825,7 @@ watch(
   align-items: center;
   gap: 16px;
   font-size: 12px;
-  color: var(--vp-c-text-3, #999);
+  color: var(--c-text-lighter);
 }
 
 .sentence-footer__left {
@@ -866,20 +866,21 @@ watch(
 }
 
 .action-btn {
-  background: none;
-  border: none;
-  padding: 4px;
-  cursor: pointer;
-  color: var(--vp-c-text-2, #666);
-  transition: transform 0.2s, color 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--c-text-lighter);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
 }
 
 .action-btn:hover {
-  transform: scale(1.25);
-  color: #4a90e2;
+  background: var(--c-hover-bg);
+  color: var(--c-primary);
 }
 
 .review-btn:hover {
@@ -921,10 +922,10 @@ watch(
   justify-content: center;
   width: 26px;
   height: 26px;
-  border: 1px solid var(--vp-c-divider, var(--c-border));
+  border: 1px solid var(--c-border);
   border-radius: 50%;
   background: transparent;
-  color: var(--vp-c-text-3, #999);
+  color: var(--c-text-lighter);
   cursor: pointer;
   transition: all 0.2s ease;
   margin-left: 6px;
@@ -1160,25 +1161,30 @@ watch(
 .parsed-html-content { line-height: 2.2; font-family: var(--font-serif); }
 .sentence-parsed-box { background: linear-gradient(135deg, #faf5ff 0%, var(--c-bg-lighter) 100%); }
 .sentence-parsed-inline {
-  padding: 12px 16px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border-light);
+  border-radius: 8px;
+  background: var(--c-surface-2);
+  color: var(--c-text);
   font-size: 15px;
   line-height: 2.2;
-  color: var(--c-text);
   word-break: break-word;
   font-family: var(--font-serif);
 }
 .sentence-note-inline {
-  padding: 2px 14px 4px;
+  padding: 8px 14px 4px;
+  color: var(--c-text-lighter);
   font-size: 13px;
   line-height: 1.5;
-  color: #8b5cf6;
   font-style: italic;
 }
 .sentence-translation-inline {
-  padding: 8px 16px 12px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--c-border-light);
+  color: var(--c-text-lighter);
   font-size: 14px;
   line-height: 1.6;
-  color: var(--c-text-lighter);
-  border-top: 1px solid var(--c-border-light, #f1f5f9);
 }
 </style>

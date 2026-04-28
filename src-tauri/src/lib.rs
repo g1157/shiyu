@@ -21,6 +21,7 @@ use commands::sentences::{
     get_sentences_by_ebook, update_sentence_review, update_sentence_srs,
 };
 use commands::settings::{delete_setting, get_all_settings, get_setting, set_setting};
+use commands::translations::{get_document_translations, save_document_translations};
 use commands::vocabulary::{
     add_vocabulary, delete_vocabulary, get_due_vocabulary, get_vocabulary,
     get_vocabulary_by_article, get_vocabulary_by_ebook, get_vocabulary_grouped,
@@ -66,6 +67,9 @@ pub fn run() {
             translate_text,
             translate_article_stream,
             test_api_connection,
+            // Document translations
+            get_document_translations,
+            save_document_translations,
             // Data
             export_all_data,
             export_data_to_file,

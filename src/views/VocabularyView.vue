@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onActivated, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import {
   deleteVocabulary,
   getEbooks,
   getVocabularyGrouped,
   updateVocabularyReview,
-  type EbookItem,
   type VocabularyGrouped,
   type VocabularyItem,
 } from '../services/api'
@@ -17,12 +17,14 @@ import { useTTS } from '../composables/useTTS'
 import { formatDate } from '../utils/format'
 import { getMeaningDefinition } from '../composables/useVocabularyDisplay'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.vue'
+import { getDocumentRef, resolveDocumentSourceSummary } from '../utils/documentSource'
 import '../styles/vocabulary-view.css'
 
 const route = useRoute()
 const toast = useGlobalToast()
 const router = useRouter()
 const appStore = useAppStore()
+const { ebooks } = storeToRefs(appStore)
 const { isSpeaking, isLoading, speakingKey, loadingKey, speak } = useTTS()
 
 // ── Data ──
@@ -33,7 +35,6 @@ const showDeleteConfirm = ref(false)
 const deleteTargetId = ref<string | null>(null)
 const sortBy = ref<'date' | 'alpha' | 'review'>('date')
 const expandedWords = ref<Set<string>>(new Set())
-const ebooks = ref<EbookItem[]>([])
 
 let isDeleting = false
 
@@ -112,7 +113,8 @@ async function loadVocabulary() {
 
 async function loadEbooks() {
   try {
-    ebooks.value = await getEbooks()
+    const latest = await getEbooks()
+    appStore.setEbooks(latest)
   } catch (e) {
     console.error('加载书架标题失败:', e)
   }
@@ -135,7 +137,10 @@ function isExpanded(word: string) {
 function getSourceCount(group: VocabularyGrouped) {
   return new Set(
     group.entries
-      .flatMap((entry) => [entry.article_path, entry.ebook_id])
+      .map((entry) => {
+        const ref = getDocumentRef(entry)
+        return ref ? `${ref.kind}:${ref.id}` : null
+      })
       .filter((value): value is string => Boolean(value))
   ).size
 }
@@ -180,7 +185,10 @@ async function confirmDelete() {
         g.entries.splice(idx, 1)
         g.article_count = new Set(
           g.entries
-            .flatMap((e) => [e.article_path, e.ebook_id])
+            .map((e) => {
+              const ref = getDocumentRef(e)
+              return ref ? `${ref.kind}:${ref.id}` : null
+            })
             .filter((value): value is string => Boolean(value))
         ).size
         // 如果该组已空，移除整个组
@@ -211,12 +219,23 @@ function cancelDelete() {
 
 // 跳转到原文
 async function goToSource(entry: VocabularyItem) {
-  if (entry.ebook_id && entry.ebook_cfi) {
-    const exists = ebooks.value.some((item) => item.id === entry.ebook_id)
+  const ref = getDocumentRef(entry)
+  if (!ref) {
+    toast.warning('该单词未关联文章或图书，无法跳转')
+    return
+  }
+
+  if (ref.kind === 'ebook') {
+    if (!entry.ebook_cfi) {
+      toast.warning('该单词缺少图书定位信息，暂时无法跳转到原文位置')
+      return
+    }
+
+    const exists = ebooks.value.some((item) => item.id === ref.id)
     if (!exists) {
       await loadEbooks()
     }
-    if (!ebooks.value.some((item) => item.id === entry.ebook_id)) {
+    if (!ebooks.value.some((item) => item.id === ref.id)) {
       toast.warning('未找到关联图书，可能已从书架删除')
       return
     }
@@ -224,7 +243,7 @@ async function goToSource(entry: VocabularyItem) {
     void router.push({
       path: '/books',
       query: {
-        bookId: entry.ebook_id,
+        bookId: ref.id,
         cfi: entry.ebook_cfi,
         highlight: entry.id,
         type: 'word',
@@ -233,14 +252,9 @@ async function goToSource(entry: VocabularyItem) {
     return
   }
 
-  if (!entry.article_path) {
-    toast.warning('该单词未关联文章或图书，无法跳转')
-    return
-  }
-
   try {
     const articles = await appStore.fetchArticles()
-    const article = articles.find((item) => item.id === entry.article_path)
+    const article = articles.find((item) => item.id === ref.id)
     if (article) {
       void router.push({
         path: '/articles',
@@ -248,24 +262,18 @@ async function goToSource(entry: VocabularyItem) {
       })
       return
     }
-
   } catch (_e) { /* ignore */ }
+
   toast.warning('未找到关联原文')
 }
 
 function getSourceTitle(entry: VocabularyItem): string {
-  if (entry.ebook_id) {
-    const ebook = ebooks.value.find((item) => item.id === entry.ebook_id)
-    if (ebook) return ebook.title
-    return '图书原文'
-  }
+  const summary = resolveDocumentSourceSummary(entry, appStore.articles, ebooks.value)
+  if (summary?.label) return summary.label
 
-  const articlePath = entry.article_path
-  if (!articlePath) return '未知来源'
-  const article = appStore.articles.find((a) => a.id === articlePath)
-  if (article) return article.title
-
-  return articlePath.length > 20 ? articlePath.substring(0, 20) + '...' : articlePath
+  const ref = getDocumentRef(entry)
+  if (!ref) return '未知来源'
+  return ref.id.length > 20 ? ref.id.substring(0, 20) + '...' : ref.id
 }
 
 onMounted(async () => {
@@ -474,7 +482,7 @@ watch(
               class="grouped-entry"
             >
               <button
-                v-if="entry.article_path || entry.ebook_id"
+                v-if="getDocumentRef(entry)"
                 class="entry-article-link"
                 @click="goToSource(entry)"
                 :title="getSourceTitle(entry)"

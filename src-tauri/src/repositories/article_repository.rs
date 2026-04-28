@@ -16,10 +16,25 @@ impl FromRow for ArticleItem {
             description: row.get(5)?,
             word_count: row.get(6)?,
             created_at: row.get(7)?,
-            mindmap_markdown: row.get(8)?,
+            content_kind: row.get(8)?,
+            source_kind: row.get(9)?,
+            source_document_id: row.get(10)?,
+            source_document_title: row.get(11)?,
+            source_href: row.get(12)?,
+            source_cfi: row.get(13)?,
+            source_anchor: row.get(14)?,
+            import_source: row.get(15)?,
+            published_at: row.get(16)?,
+            mindmap_markdown: row.get(17)?,
         })
     }
 }
+
+const ARTICLE_SELECT: &str =
+    "SELECT id, title, content, author, category, description, word_count, created_at,
+            content_kind, source_kind, source_document_id, source_document_title,
+            source_href, source_cfi, source_anchor, import_source, published_at, mindmap_markdown
+     FROM articles";
 
 /// 文章Repository
 pub struct ArticleRepository;
@@ -31,11 +46,14 @@ impl ArticleRepository {
 
     /// 获取文章列表（不包含content字段）
     pub fn find_all(&self, conn: &MutexGuard<Connection>) -> Result<Vec<ArticleItem>> {
-        let mut stmt = conn.prepare(
-            "SELECT id, title, '' as content, author, category, description, word_count, created_at, mindmap_markdown
+        let sql = format!(
+            "SELECT id, title, '' as content, author, category, description, word_count, created_at,
+                    content_kind, source_kind, source_document_id, source_document_title,
+                    source_href, source_cfi, source_anchor, import_source, published_at, mindmap_markdown
              FROM articles
-             ORDER BY created_at DESC",
-        )?;
+             ORDER BY created_at DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
 
         let items = stmt
             .query_map([], |row| ArticleItem::from_row(row))?
@@ -50,12 +68,8 @@ impl ArticleRepository {
         conn: &MutexGuard<Connection>,
         id: &str,
     ) -> Result<Option<ArticleItem>> {
-        let result = conn.query_row(
-            "SELECT id, title, content, author, category, description, word_count, created_at, mindmap_markdown
-             FROM articles WHERE id = ?1",
-            [id],
-            |row| ArticleItem::from_row(row),
-        );
+        let sql = format!("{} WHERE id = ?1", ARTICLE_SELECT);
+        let result = conn.query_row(&sql, [id], |row| ArticleItem::from_row(row));
 
         match result {
             Ok(item) => Ok(Some(item)),
@@ -73,11 +87,33 @@ impl ArticleRepository {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
         let word_count = req.content.split_whitespace().count() as i64;
+        let content_kind = req.content_kind.unwrap_or_else(|| "article".to_string());
 
         conn.execute(
-            "INSERT INTO articles (id, title, content, author, category, description, word_count, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![id, req.title, req.content, req.author, req.category, req.description, word_count, now],
+            "INSERT INTO articles (
+                id, title, content, author, category, description, word_count, created_at,
+                content_kind, source_kind, source_document_id, source_document_title,
+                source_href, source_cfi, source_anchor, import_source, published_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            rusqlite::params![
+                id,
+                req.title,
+                req.content,
+                req.author,
+                req.category,
+                req.description,
+                word_count,
+                now,
+                content_kind,
+                req.source_kind,
+                req.source_document_id,
+                req.source_document_title,
+                req.source_href,
+                req.source_cfi,
+                req.source_anchor,
+                req.import_source,
+                req.published_at,
+            ],
         )?;
 
         Ok(ArticleItem {
@@ -89,6 +125,15 @@ impl ArticleRepository {
             description: req.description,
             word_count,
             created_at: now,
+            content_kind,
+            source_kind: req.source_kind,
+            source_document_id: req.source_document_id,
+            source_document_title: req.source_document_title,
+            source_href: req.source_href,
+            source_cfi: req.source_cfi,
+            source_anchor: req.source_anchor,
+            import_source: req.import_source,
+            published_at: req.published_at,
             mindmap_markdown: None,
         })
     }

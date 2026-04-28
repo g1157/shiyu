@@ -3,7 +3,7 @@ use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-const CURRENT_SCHEMA_VERSION: i32 = 5;
+const CURRENT_SCHEMA_VERSION: i32 = 7;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -114,6 +114,26 @@ impl Database {
         }
 
         let sql = format!("ALTER TABLE {table} ADD COLUMN {definition}");
+        conn.execute(&sql, [])?;
+        Ok(())
+    }
+
+    fn backfill_document_refs(conn: &Connection, table: &str) -> Result<()> {
+        let sql = format!(
+            "UPDATE {table}
+             SET document_kind = CASE
+                    WHEN document_kind IS NOT NULL AND TRIM(document_kind) != '' THEN document_kind
+                    WHEN ebook_id IS NOT NULL AND TRIM(ebook_id) != '' THEN 'ebook'
+                    WHEN article_path IS NOT NULL AND TRIM(article_path) != '' THEN 'article'
+                    ELSE NULL
+                 END,
+                 document_id = CASE
+                    WHEN document_id IS NOT NULL AND TRIM(document_id) != '' THEN document_id
+                    WHEN ebook_id IS NOT NULL AND TRIM(ebook_id) != '' THEN ebook_id
+                    WHEN article_path IS NOT NULL AND TRIM(article_path) != '' THEN article_path
+                    ELSE NULL
+                 END"
+        );
         conn.execute(&sql, [])?;
         Ok(())
     }
@@ -254,6 +274,71 @@ impl Database {
             )?;
         }
 
+        if from_version < 6 {
+            Self::add_column_if_missing(
+                conn,
+                "articles",
+                "content_kind",
+                "content_kind TEXT NOT NULL DEFAULT 'article'",
+            )?;
+            Self::add_column_if_missing(conn, "articles", "source_kind", "source_kind TEXT")?;
+            Self::add_column_if_missing(
+                conn,
+                "articles",
+                "source_document_id",
+                "source_document_id TEXT",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "articles",
+                "source_document_title",
+                "source_document_title TEXT",
+            )?;
+            Self::add_column_if_missing(conn, "articles", "source_href", "source_href TEXT")?;
+            Self::add_column_if_missing(conn, "articles", "source_cfi", "source_cfi TEXT")?;
+            Self::add_column_if_missing(conn, "articles", "source_anchor", "source_anchor TEXT")?;
+            Self::add_column_if_missing(conn, "articles", "import_source", "import_source TEXT")?;
+            Self::add_column_if_missing(conn, "articles", "published_at", "published_at INTEGER")?;
+
+            Self::add_column_if_missing(conn, "vocabulary", "document_kind", "document_kind TEXT")?;
+            Self::add_column_if_missing(conn, "vocabulary", "document_id", "document_id TEXT")?;
+            Self::add_column_if_missing(conn, "sentences", "document_kind", "document_kind TEXT")?;
+            Self::add_column_if_missing(conn, "sentences", "document_id", "document_id TEXT")?;
+
+            Self::backfill_document_refs(conn, "vocabulary")?;
+            Self::backfill_document_refs(conn, "sentences")?;
+
+            conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS document_translations (
+                    document_kind TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    anchor TEXT NOT NULL DEFAULT '',
+                    segment_index INTEGER NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    translation TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (document_kind, document_id, anchor, segment_index)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_document_translations_document
+                    ON document_translations(document_kind, document_id, anchor);
+                CREATE INDEX IF NOT EXISTS idx_document_translations_updated_at
+                    ON document_translations(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_vocabulary_document_ref
+                    ON vocabulary(document_kind, document_id);
+                CREATE INDEX IF NOT EXISTS idx_sentences_document_ref
+                    ON sentences(document_kind, document_id);
+                CREATE INDEX IF NOT EXISTS idx_articles_source_document
+                    ON articles(source_kind, source_document_id);
+                ",
+            )?;
+        }
+
+        if from_version < 7 {
+            Self::add_column_if_missing(conn, "ebooks", "cover_path", "cover_path TEXT")?;
+        }
+
         Ok(())
     }
 
@@ -269,6 +354,8 @@ impl Database {
                 ebook_id TEXT,
                 ebook_cfi TEXT,
                 ebook_href TEXT,
+                document_kind TEXT,
+                document_id TEXT,
                 review_count INTEGER NOT NULL DEFAULT 0,
                 last_reviewed_at INTEGER,
                 created_at INTEGER NOT NULL,
@@ -292,6 +379,8 @@ impl Database {
                 ebook_id TEXT,
                 ebook_cfi TEXT,
                 ebook_href TEXT,
+                document_kind TEXT,
+                document_id TEXT,
                 review_count INTEGER NOT NULL DEFAULT 0,
                 last_reviewed_at INTEGER,
                 created_at INTEGER NOT NULL,
@@ -318,6 +407,15 @@ impl Database {
                 description TEXT,
                 word_count INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
+                content_kind TEXT NOT NULL DEFAULT 'article',
+                source_kind TEXT,
+                source_document_id TEXT,
+                source_document_title TEXT,
+                source_href TEXT,
+                source_cfi TEXT,
+                source_anchor TEXT,
+                import_source TEXT,
+                published_at INTEGER,
                 mindmap_markdown TEXT
             );
 
@@ -331,7 +429,19 @@ impl Database {
                 cfi_position TEXT,
                 last_read_at INTEGER,
                 created_at INTEGER NOT NULL,
-                source_hash TEXT
+                source_hash TEXT,
+                cover_path TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS document_translations (
+                document_kind TEXT NOT NULL,
+                document_id TEXT NOT NULL,
+                anchor TEXT NOT NULL DEFAULT '',
+                segment_index INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                translation TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (document_kind, document_id, anchor, segment_index)
             );
 
             -- Schema版本表（用于迁移）
@@ -360,9 +470,16 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_sentences_srs_due ON sentences(srs_due);
             CREATE INDEX IF NOT EXISTS idx_vocabulary_ebook_id ON vocabulary(ebook_id);
             CREATE INDEX IF NOT EXISTS idx_sentences_ebook_id ON sentences(ebook_id);
+            CREATE INDEX IF NOT EXISTS idx_vocabulary_document_ref ON vocabulary(document_kind, document_id);
+            CREATE INDEX IF NOT EXISTS idx_sentences_document_ref ON sentences(document_kind, document_id);
             CREATE INDEX IF NOT EXISTS idx_articles_created_at ON articles(created_at);
+            CREATE INDEX IF NOT EXISTS idx_articles_source_document ON articles(source_kind, source_document_id);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_ebooks_source_hash ON ebooks(source_hash);
             CREATE INDEX IF NOT EXISTS idx_ebooks_last_read_at ON ebooks(last_read_at);
+            CREATE INDEX IF NOT EXISTS idx_document_translations_document
+                ON document_translations(document_kind, document_id, anchor);
+            CREATE INDEX IF NOT EXISTS idx_document_translations_updated_at
+                ON document_translations(updated_at);
             ",
         )?;
         Ok(())

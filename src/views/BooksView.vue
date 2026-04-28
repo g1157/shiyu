@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
+import { convertFileSrc } from '@tauri-apps/api/core'
+import { storeToRefs } from 'pinia'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useRoute, useRouter } from 'vue-router'
 import { deleteEbook, getEbooks, importEpubAsBook, type EbookItem } from '../services/api'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.vue'
 import { useGlobalToast } from '../composables/useGlobalToast'
 import type { HighlightType } from '../composables/useRouteQuery'
+import { useAppStore } from '../stores/appStore'
 import { formatDate } from '../utils/format'
 
 const BookReader = defineAsyncComponent(() => import('../components/BookReader.vue'))
@@ -13,8 +16,9 @@ const BookReader = defineAsyncComponent(() => import('../components/BookReader.v
 const route = useRoute()
 const router = useRouter()
 const toast = useGlobalToast()
+const appStore = useAppStore()
+const { ebooks, recentEbooks, ebooksCount } = storeToRefs(appStore)
 
-const books = ref<EbookItem[]>([])
 const loading = ref(false)
 const importing = ref(false)
 const searchQuery = ref('')
@@ -26,14 +30,16 @@ const readerHighlightType = ref<HighlightType | null>(null)
 const deleteTarget = ref<EbookItem | null>(null)
 const showDeleteConfirm = ref(false)
 
+const normalizedSearch = computed(() => searchQuery.value.trim().toLowerCase())
+const currentBook = computed(() => recentEbooks.value[0] ?? null)
 const filteredBooks = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return books.value
-  return books.value.filter((book) =>
-    book.title.toLowerCase().includes(q) ||
-    (book.author?.toLowerCase().includes(q) ?? false)
+  if (!normalizedSearch.value) return recentEbooks.value
+  return recentEbooks.value.filter((book) =>
+    book.title.toLowerCase().includes(normalizedSearch.value)
+    || (book.author?.toLowerCase().includes(normalizedSearch.value) ?? false),
   )
 })
+const hasBooks = computed(() => ebooksCount.value > 0)
 
 function getQueryValue(value: unknown): string | null {
   if (typeof value === 'string') return value
@@ -55,12 +61,16 @@ function clearBookQuery() {
   void router.replace({ path: route.path, query })
 }
 
-async function loadBooks() {
+async function loadBooks(force = false) {
   loading.value = true
   try {
-    books.value = await getEbooks()
+    if (force || ebooks.value.length === 0) {
+      const latest = await getEbooks()
+      appStore.setEbooks(latest)
+    }
   } catch (e: any) {
     toast.error('加载书架失败: ' + e)
+    throw e
   } finally {
     loading.value = false
   }
@@ -105,11 +115,11 @@ async function openReaderFromRouteQuery() {
   const highlightId = getQueryValue(route.query.highlight)
   const highlightType = normalizeHighlightType(getQueryValue(route.query.type))
 
-  if (books.value.length === 0) {
+  if (ebooks.value.length === 0) {
     await loadBooks()
   }
 
-  const target = books.value.find((item) => item.id === bookId)
+  const target = ebooks.value.find((item) => item.id === bookId)
   if (!target) {
     clearBookQuery()
     return
@@ -134,7 +144,7 @@ async function handleImportBook() {
 
     importing.value = true
     const saved = await importEpubAsBook(selected as string)
-    await loadBooks()
+    appStore.addEbook(saved)
     openReader(saved)
     toast.success(`《${saved.title}》已导入书架`)
   } catch (e: any) {
@@ -154,7 +164,7 @@ async function confirmDelete() {
 
   try {
     await deleteEbook(deleteTarget.value.id)
-    books.value = books.value.filter((item) => item.id !== deleteTarget.value?.id)
+    appStore.removeEbook(deleteTarget.value.id)
     if (readerBook.value?.id === deleteTarget.value.id) {
       closeReader()
     }
@@ -172,11 +182,41 @@ function cancelDelete() {
 }
 
 function handleBookUpdated(updated: EbookItem) {
-  const index = books.value.findIndex((item) => item.id === updated.id)
-  if (index >= 0) {
-    books.value[index] = updated
-  }
+  appStore.updateEbook(updated)
   readerBook.value = updated
+}
+
+function formatPercent(progress: number) {
+  return `${Math.round(Math.max(0, Math.min(1, progress)) * 100)}%`
+}
+
+function getBookStatus(book: EbookItem) {
+  if (book.progress >= 1) return '已完成'
+  if (book.progress > 0) return '在读'
+  return '未开始'
+}
+
+function getBookStatusClass(book: EbookItem) {
+  if (book.progress >= 1) return 'is-complete'
+  if (book.progress > 0) return 'is-active'
+  return 'is-new'
+}
+
+function getCoverSrc(book: EbookItem) {
+  return book.cover_path ? convertFileSrc(book.cover_path) : ''
+}
+
+function formatRelativeTime(timestamp?: number) {
+  if (!timestamp) return '尚未开始'
+
+  const diff = Date.now() - timestamp
+  const hour = 60 * 60 * 1000
+  const day = 24 * hour
+
+  if (diff < hour) return '刚刚读过'
+  if (diff < day) return `${Math.max(1, Math.round(diff / hour))} 小时前`
+  if (diff < day * 7) return `${Math.max(1, Math.round(diff / day))} 天前`
+  return formatDate(timestamp)
 }
 
 onMounted(async () => {
@@ -201,72 +241,90 @@ watch(() => route.fullPath, () => {
     @updated="handleBookUpdated"
   />
 
-  <section v-else class="page-container books-page">
-    <header class="page-header">
+  <section v-else class="books-page">
+    <header class="shelf-header">
       <div>
-        <h1 class="page-title">图书书架</h1>
-        <p class="page-subtitle">直接导入 EPUB 为图书，保留目录、进度与章节定位。</p>
+        <p class="shelf-kicker">Library</p>
+        <h1>书架</h1>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-primary" :disabled="importing" @click="handleImportBook">
-          {{ importing ? '导入中...' : '导入 EPUB 图书' }}
-        </button>
-      </div>
+      <button class="btn btn-primary" :disabled="importing" @click="handleImportBook">
+        {{ importing ? '导入中...' : '导入 EPUB' }}
+      </button>
     </header>
 
-    <div class="toolbar glass-card">
+    <button v-if="currentBook" class="continue-strip" type="button" @click="openReader(currentBook)">
+      <div class="continue-strip__main">
+        <span>继续阅读</span>
+        <strong>{{ currentBook.title }}</strong>
+        <small>{{ currentBook.author || '未填写作者' }} · {{ formatRelativeTime(currentBook.last_read_at) }}</small>
+      </div>
+      <div class="continue-strip__progress">
+        <div class="progress-track">
+          <div class="progress-fill" :style="{ width: formatPercent(currentBook.progress) }"></div>
+        </div>
+        <span>{{ formatPercent(currentBook.progress) }}</span>
+      </div>
+    </button>
+
+    <section class="shelf-toolbar">
       <div class="search-box">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/>
           <line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input v-model="searchQuery" placeholder="搜索书名或作者..." class="search-input" />
+        <input v-model="searchQuery" placeholder="搜索书名或作者" class="search-input" />
       </div>
-      <span class="result-count">{{ filteredBooks.length }} 本</span>
-    </div>
+      <span class="result-count">{{ filteredBooks.length }} / {{ ebooksCount }} 本</span>
+    </section>
 
-    <div v-if="loading" class="empty-state glass-card">
+    <div v-if="loading" class="empty-state">
       <p>正在加载书架...</p>
     </div>
 
-    <div v-else-if="filteredBooks.length === 0" class="empty-state glass-card">
+    <div v-else-if="!hasBooks" class="empty-state empty-state--action">
       <p>书架还是空的</p>
-      <span>点击“导入 EPUB 图书”即可直接以图书方式阅读，不再拆成零散文章。</span>
+      <span>导入一本 EPUB，就可以直接开始阅读并保存词句。</span>
+      <button class="btn btn-primary" :disabled="importing" @click="handleImportBook">
+        {{ importing ? '导入中...' : '导入 EPUB' }}
+      </button>
     </div>
 
-    <div v-else class="book-grid">
+    <div v-else-if="filteredBooks.length" class="book-grid">
       <article
         v-for="book in filteredBooks"
         :key="book.id"
-        class="book-card glass-card"
+        class="book-card"
+        role="button"
+        tabindex="0"
         @click="openReader(book)"
+        @keydown.enter.prevent="openReader(book)"
+        @keydown.space.prevent="openReader(book)"
       >
-        <div class="book-cover">
-          <div class="cover-icon">EPUB</div>
+        <div class="book-cover" :class="{ 'book-cover--image': book.cover_path }">
+          <img v-if="book.cover_path" :src="getCoverSrc(book)" :alt="`${book.title} 封面`" />
+          <span v-else>{{ book.format.toUpperCase() }}</span>
         </div>
-        <div class="book-body">
+        <div class="book-main">
           <div class="book-top">
-            <div>
-              <h3 class="book-title">{{ book.title }}</h3>
-              <p class="book-author">{{ book.author || '未知作者' }}</p>
-            </div>
+            <span class="book-status" :class="getBookStatusClass(book)">{{ getBookStatus(book) }}</span>
             <button class="delete-btn" title="删除图书" @click.stop="handleDelete(book)">×</button>
           </div>
-
+          <h2>{{ book.title }}</h2>
+          <p>{{ book.author || '未填写作者' }}</p>
           <div class="progress-row">
             <div class="progress-track">
-              <div class="progress-fill" :style="{ width: `${Math.max(0, Math.min(100, book.progress * 100))}%` }"></div>
+              <div class="progress-fill" :style="{ width: formatPercent(book.progress) }"></div>
             </div>
-            <span>{{ Math.round(book.progress * 100) }}%</span>
+            <span>{{ formatPercent(book.progress) }}</span>
           </div>
-
-          <div class="book-meta">
-            <span class="meta-tag">{{ book.format.toUpperCase() }}</span>
-            <span class="meta-tag">导入于 {{ formatDate(book.created_at) }}</span>
-            <span class="meta-tag" v-if="book.last_read_at">最近阅读 {{ formatDate(book.last_read_at) }}</span>
-          </div>
+          <small>{{ formatRelativeTime(book.last_read_at) }} · 导入于 {{ formatDate(book.created_at) }}</small>
         </div>
       </article>
+    </div>
+
+    <div v-else class="empty-state">
+      <p>没有匹配的图书</p>
+      <span>换个关键词试试。</span>
     </div>
 
     <DeleteConfirmModal
@@ -281,44 +339,106 @@ watch(() => route.fullPath, () => {
 
 <style scoped>
 .books-page {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  padding: 34px 32px 48px;
   display: flex;
   flex-direction: column;
   gap: 18px;
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 1.6rem;
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
-  color: var(--c-text-lighter);
-}
-
-.glass-card {
-  background: var(--c-glass-bg);
-  border: 1px solid var(--c-glass-border);
-  box-shadow: var(--c-shadow-lg);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.toolbar {
+.shelf-header,
+.shelf-toolbar,
+.continue-strip {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 16px;
+}
+
+.shelf-kicker {
+  margin: 0 0 5px;
+  color: var(--c-text-lighter);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shelf-header h1 {
+  margin: 0;
+  color: var(--c-text);
+  font-size: 2rem;
+  letter-spacing: -0.04em;
+}
+
+.continue-strip,
+.shelf-toolbar,
+.empty-state,
+.book-card {
+  border: 1px solid var(--c-border);
   border-radius: 16px;
+  background: var(--c-surface-1);
+}
+
+.continue-strip {
+  width: 100%;
+  padding: 15px 16px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.continue-strip:hover,
+.continue-strip:focus-visible,
+.book-card:hover,
+.book-card:focus-visible {
+  border-color: var(--c-border-strong);
+  background: var(--c-hover-bg);
+  outline: none;
+}
+
+.continue-strip__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.continue-strip__main span,
+.continue-strip__main small,
+.result-count,
+.book-main p,
+.book-main small {
+  color: var(--c-text-lighter);
+}
+
+.continue-strip__main span {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.continue-strip__main strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text);
+  font-size: 1rem;
+}
+
+.continue-strip__progress {
+  min-width: 190px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--c-text-lighter);
+  font-weight: 700;
+}
+
+.shelf-toolbar {
+  padding: 10px 12px;
 }
 
 .search-box {
@@ -326,15 +446,7 @@ watch(() => route.fullPath, () => {
   align-items: center;
   gap: 8px;
   flex: 1;
-  max-width: 420px;
-  padding: 10px 12px;
-  border: 1px solid var(--c-border);
-  border-radius: 12px;
-  background: var(--c-bg-light);
-}
-
-.search-box svg,
-.result-count {
+  max-width: 460px;
   color: var(--c-text-lighter);
 }
 
@@ -349,123 +461,187 @@ watch(() => route.fullPath, () => {
 
 .book-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .book-card {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
   gap: 14px;
-  padding: 16px;
-  border-radius: 18px;
+  padding: 14px;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-
-.book-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 22px 48px rgba(37, 99, 235, 0.12);
+  transition: border-color 0.16s ease, background 0.16s ease;
 }
 
 .book-cover {
-  height: 140px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-}
-
-.cover-icon {
-  font-size: 1.15rem;
+  min-height: 104px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #edede7, #dcdcd4);
+  color: var(--c-text-lighter);
+  font-size: 0.72rem;
   font-weight: 800;
-  letter-spacing: 1px;
-  color: #fff;
+  letter-spacing: 0.08em;
+  overflow: hidden;
 }
 
-.book-body {
+.book-cover--image {
+  align-items: stretch;
+  padding: 0;
+  background: var(--c-surface-2);
+}
+
+.book-cover img {
+  width: 100%;
+  height: 100%;
+  min-height: 104px;
+  object-fit: cover;
+}
+
+:global(:root.dark) .book-cover {
+  background: linear-gradient(180deg, #243047, #1a2234);
+}
+
+.book-main {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .book-top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
-.book-title {
-  margin: 0;
-  font-size: 1.05rem;
-  color: var(--c-text);
-}
-
-.book-author {
-  margin: 6px 0 0;
+.book-status {
   color: var(--c-text-lighter);
-  font-size: 0.9rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.book-status.is-active {
+  color: var(--c-primary);
+}
+
+.book-status.is-complete {
+  color: #3b7f4a;
+}
+
+.book-main h2 {
+  margin: 0;
+  color: var(--c-text);
+  font-size: 1rem;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-main p,
+.book-main small {
+  margin: 0;
+  line-height: 1.5;
 }
 
 .delete-btn {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 50%;
-  background: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
-  font-size: 1.15rem;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-text-lighter);
+  font-size: 1rem;
   cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.book-card:hover .delete-btn,
+.delete-btn:focus-visible {
+  opacity: 1;
+}
+
+.delete-btn:hover {
+  background: rgba(199, 53, 53, 0.08);
+  color: var(--c-danger);
 }
 
 .progress-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.85rem;
+  gap: 9px;
   color: var(--c-text-lighter);
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 
 .progress-track {
   flex: 1;
-  height: 8px;
+  height: 4px;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.18);
+  background: var(--c-track-bg);
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-}
-
-.book-meta {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.meta-tag {
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.12);
-  color: var(--c-text-lighter);
-  font-size: 0.78rem;
+  background: var(--c-primary);
 }
 
 .empty-state {
-  padding: 40px 20px;
-  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 42px 24px;
   text-align: center;
   color: var(--c-text-lighter);
 }
 
 .empty-state p {
-  margin: 0 0 8px;
-  font-size: 1rem;
+  margin: 0;
   color: var(--c-text);
+  font-weight: 700;
+}
+
+.empty-state--action .btn {
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .books-page {
+    padding: 26px 18px 40px;
+  }
+
+  .book-grid,
+  .book-card {
+    grid-template-columns: 1fr;
+  }
+
+  .book-cover {
+    min-height: 86px;
+  }
+}
+
+@media (max-width: 680px) {
+  .shelf-header,
+  .shelf-toolbar,
+  .continue-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .continue-strip__progress {
+    width: 100%;
+    min-width: 0;
+  }
 }
 </style>

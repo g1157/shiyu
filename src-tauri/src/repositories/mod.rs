@@ -1,6 +1,7 @@
 use rusqlite::{Result, Row};
 
 pub mod article_repository;
+pub mod document_translation_repository;
 pub mod ebook_repository;
 pub mod sentence_repository;
 pub mod vocabulary_repository;

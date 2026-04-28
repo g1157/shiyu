@@ -15,22 +15,25 @@ impl FromRow for SentenceItem {
             ebook_id: row.get(4)?,
             ebook_cfi: row.get(5)?,
             ebook_href: row.get(6)?,
-            review_count: row.get(7)?,
-            last_reviewed_at: row.get(8)?,
-            created_at: row.get(9)?,
-            srs_due: row.get(10)?,
-            srs_stability: row.get(11)?,
-            srs_difficulty: row.get(12)?,
-            srs_state: row.get(13)?,
-            srs_lapses: row.get(14)?,
-            srs_reps: row.get(15)?,
-            srs_last_review: row.get(16)?,
+            document_kind: row.get(7)?,
+            document_id: row.get(8)?,
+            review_count: row.get(9)?,
+            last_reviewed_at: row.get(10)?,
+            created_at: row.get(11)?,
+            srs_due: row.get(12)?,
+            srs_stability: row.get(13)?,
+            srs_difficulty: row.get(14)?,
+            srs_state: row.get(15)?,
+            srs_lapses: row.get(16)?,
+            srs_reps: row.get(17)?,
+            srs_last_review: row.get(18)?,
         })
     }
 }
 
 const SENTENCE_SELECT: &str =
     "SELECT id, sentence, explanation, article_path, ebook_id, ebook_cfi, ebook_href,
+            document_kind, document_id,
             review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty,
             srs_state, srs_lapses, srs_reps, srs_last_review
      FROM sentences";
@@ -62,7 +65,7 @@ impl SentenceRepository {
         article_path: &str,
     ) -> Result<Vec<SentenceItem>> {
         let sql = format!(
-            "{} WHERE article_path = ?1 ORDER BY created_at DESC",
+            "{} WHERE article_path = ?1 OR (document_kind = 'article' AND document_id = ?1) ORDER BY created_at DESC",
             SENTENCE_SELECT
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -80,7 +83,7 @@ impl SentenceRepository {
         ebook_id: &str,
     ) -> Result<Vec<SentenceItem>> {
         let sql = format!(
-            "{} WHERE ebook_id = ?1 ORDER BY created_at DESC",
+            "{} WHERE ebook_id = ?1 OR (document_kind = 'ebook' AND document_id = ?1) ORDER BY created_at DESC",
             SENTENCE_SELECT
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -119,11 +122,24 @@ impl SentenceRepository {
     ) -> Result<SentenceItem> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
+        let document_kind = req.document_kind.or_else(|| {
+            if req.ebook_id.is_some() {
+                Some("ebook".to_string())
+            } else if req.article_path.is_some() {
+                Some("article".to_string())
+            } else {
+                None
+            }
+        });
+        let document_id = req
+            .document_id
+            .or_else(|| req.ebook_id.clone())
+            .or_else(|| req.article_path.clone());
 
         conn.execute(
             "INSERT INTO sentences (
-                id, sentence, explanation, article_path, ebook_id, ebook_cfi, ebook_href, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                id, sentence, explanation, article_path, ebook_id, ebook_cfi, ebook_href, document_kind, document_id, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 id,
                 req.sentence,
@@ -132,6 +148,8 @@ impl SentenceRepository {
                 req.ebook_id,
                 req.ebook_cfi,
                 req.ebook_href,
+                document_kind,
+                document_id,
                 now
             ],
         )?;
@@ -144,6 +162,8 @@ impl SentenceRepository {
             ebook_id: req.ebook_id,
             ebook_cfi: req.ebook_cfi,
             ebook_href: req.ebook_href,
+            document_kind,
+            document_id,
             review_count: 0,
             last_reviewed_at: None,
             created_at: now,
@@ -211,8 +231,15 @@ impl SentenceRepository {
         article_path: &str,
     ) -> Result<usize> {
         conn.execute(
-            "DELETE FROM sentences WHERE article_path = ?1",
+            "DELETE FROM sentences WHERE article_path = ?1 OR (document_kind = 'article' AND document_id = ?1)",
             [article_path],
+        )
+    }
+
+    pub fn delete_by_ebook(&self, conn: &MutexGuard<Connection>, ebook_id: &str) -> Result<usize> {
+        conn.execute(
+            "DELETE FROM sentences WHERE ebook_id = ?1 OR (document_kind = 'ebook' AND document_id = ?1)",
+            [ebook_id],
         )
     }
 }

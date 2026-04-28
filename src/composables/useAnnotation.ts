@@ -10,12 +10,16 @@ import {
 } from '../services/api'
 import { preCacheText } from '../services/ttsCache'
 import { useAppStore } from '../stores/appStore'
+import { getDocumentRef } from '../utils/documentSource'
+import type { DocumentKind } from '../types/document'
 
 interface AnnotationSourcePayload {
     article_path?: string
     ebook_id?: string
     ebook_cfi?: string
     ebook_href?: string
+    document_kind?: DocumentKind
+    document_id?: string
 }
 
 /**
@@ -25,7 +29,8 @@ interface AnnotationSourcePayload {
 export function useAnnotation(
     containerRef: Ref<HTMLElement | null>,
     articleId: Ref<string | null>,
-    sourceResolver?: () => AnnotationSourcePayload
+    sourceResolver?: () => AnnotationSourcePayload,
+    documentKind: Ref<DocumentKind | null> = ref('article')
 ) {
     const appStore = useAppStore()
     const { vocabulary, sentences } = storeToRefs(appStore)
@@ -53,6 +58,8 @@ export function useAnnotation(
     async function saveWord(word: string, meaning: string, context: string) {
         const resolvedSource = sourceResolver?.() ?? {
             article_path: articleId.value ?? undefined,
+            document_kind: documentKind.value ?? undefined,
+            document_id: articleId.value ?? undefined,
         }
         const item = await addVocabulary({
             word,
@@ -75,6 +82,8 @@ export function useAnnotation(
     async function saveSentence(sentence: string, explanation: string) {
         const resolvedSource = sourceResolver?.() ?? {
             article_path: articleId.value ?? undefined,
+            document_kind: documentKind.value ?? undefined,
+            document_id: articleId.value ?? undefined,
         }
         const item = await addSentence({
             sentence,
@@ -161,14 +170,16 @@ export function useAnnotation(
         clearExistingAnnotations()
 
         const currentId = articleId.value
-        if (!currentId) return
+        const currentKind = documentKind.value
+        if (!currentId || !currentKind) return
 
-        const relevantWords = vocabulary.value.filter(
-            (w) => w.article_path != null && w.article_path === currentId
-        )
-        const relevantSentences = sentences.value.filter(
-            (s) => s.article_path != null && s.article_path === currentId
-        )
+        const isSameDocument = (item: VocabularyItem | SentenceItem) => {
+            const ref = getDocumentRef(item)
+            return ref?.kind === currentKind && ref.id === currentId
+        }
+
+        const relevantWords = vocabulary.value.filter(isSameDocument)
+        const relevantSentences = sentences.value.filter(isSameDocument)
 
         if (relevantWords.length === 0 && relevantSentences.length === 0) return
 
@@ -357,7 +368,7 @@ export function useAnnotation(
     // ── 监听数据变化自动刷新高亮 ──────────────────────────
 
     watch(
-        [vocabulary, sentences, annotationEnabled, articleId],
+        [vocabulary, sentences, annotationEnabled, articleId, documentKind],
         () => {
             nextTick(() => {
                 highlightAnnotatedContent()

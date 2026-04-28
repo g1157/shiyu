@@ -2,6 +2,7 @@
 use crate::db::Database;
 use crate::models::{AddArticleRequest, ArticleItem, UpdateArticleContentRequest};
 use crate::repositories::article_repository::ArticleRepository;
+use crate::repositories::document_translation_repository::DocumentTranslationRepository;
 use crate::repositories::sentence_repository::SentenceRepository;
 use crate::repositories::vocabulary_repository::VocabularyRepository;
 use tauri::State;
@@ -34,16 +35,19 @@ pub fn add_article(req: AddArticleRequest, db: State<Database>) -> Result<Articl
 pub fn delete_article(id: String, db: State<Database>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-    // 级联删除：先删除关联的生词和句子标注
     let vocab_repo = VocabularyRepository::new();
     let sentence_repo = SentenceRepository::new();
     let article_repo = ArticleRepository::new();
+    let translation_repo = DocumentTranslationRepository::new();
 
     vocab_repo
         .delete_by_article(&conn, &id)
         .map_err(|e| e.to_string())?;
     sentence_repo
         .delete_by_article(&conn, &id)
+        .map_err(|e| e.to_string())?;
+    translation_repo
+        .delete_by_document(&conn, "article", &id)
         .map_err(|e| e.to_string())?;
     article_repo.delete(&conn, &id).map_err(|e| e.to_string())?;
 

@@ -7,4 +7,5 @@ pub mod epub_tools;
 pub mod ocr;
 pub mod sentences;
 pub mod settings;
+pub mod translations;
 pub mod vocabulary;

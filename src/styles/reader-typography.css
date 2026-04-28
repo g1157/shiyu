@@ -22,8 +22,6 @@
   scroll-margin-top: 72px;
   line-height: 1.3;
   letter-spacing: -0.02em;
-  padding-bottom: 0.5rem;
-  border-bottom: 2px solid var(--c-border-light, #f1f5f9);
 }
 
 .reader-body h2 {
@@ -33,8 +31,6 @@
   margin: 2.2rem 0 0.8rem;
   scroll-margin-top: 72px;
   line-height: 1.35;
-  padding-left: 14px;
-  border-left: 4px solid #007AFF;
 }
 
 .reader-body h3 {
@@ -79,12 +75,7 @@
   margin: 1.5rem auto;
   display: block;
   object-fit: contain;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  transition: transform 0.3s ease;
-}
-
-.reader-body img:hover {
-  transform: scale(1.02);
+  box-shadow: none;
 }
 
 .reader-body figure {
@@ -102,11 +93,10 @@
 /* 引用块 */
 .reader-body blockquote {
   margin: 1.5rem 0;
-  padding: 1rem 1.5rem;
-  border-left: 4px solid;
-  border-image: linear-gradient(to bottom, #007AFF, #409CFF) 1;
-  background: linear-gradient(135deg, var(--c-bg-lighter), var(--c-bg-lighter));
-  border-radius: 0 12px 12px 0;
+  padding: 0.8rem 1.2rem;
+  border-left: 2px solid var(--c-border-strong);
+  background: var(--c-bg-lighter);
+  border-radius: 0 8px 8px 0;
   color: var(--c-text-lighter);
   font-style: italic;
   position: relative;
@@ -146,7 +136,7 @@
 
 /* 行内代码 */
 .reader-body code {
-  background: linear-gradient(135deg, var(--c-border-light, #f1f5f9), var(--c-border));
+  background: var(--c-bg-lighter);
   color: #e11d48;
   padding: 2px 7px;
   border-radius: 5px;
@@ -166,7 +156,7 @@
   font-size: 0.88em;
   line-height: 1.6;
   border: 1px solid var(--c-text);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: none;
 }
 
 .reader-body pre code {
@@ -189,7 +179,7 @@
 }
 
 .reader-body thead {
-  background: linear-gradient(135deg, var(--c-bg-lighter), var(--c-border-light, #f1f5f9));
+  background: var(--c-bg-lighter);
 }
 
 .reader-body th {

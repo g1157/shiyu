@@ -1,17 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ArticleItem, VocabularyItem, SentenceItem } from '../services/api'
-import { getArticles, getVocabulary, getSentences } from '../services/api'
+import type { ArticleItem, VocabularyItem, SentenceItem, EbookItem } from '../services/api'
+import { getArticles, getVocabulary, getSentences, getEbooks } from '../services/api'
 
-/**
- * 全局应用状态管理
- * 集中管理跨页面共享的数据状态
- */
 export const useAppStore = defineStore('app', () => {
-  // ── 数据缓存 ───────────────────────────────────────────
-
   const articles = ref<ArticleItem[]>([])
   const articlesLoaded = ref(false)
+
+  const ebooks = ref<EbookItem[]>([])
+  const ebooksLoaded = ref(false)
 
   const vocabulary = ref<VocabularyItem[]>([])
   const vocabularyLoaded = ref(false)
@@ -19,23 +16,18 @@ export const useAppStore = defineStore('app', () => {
   const sentences = ref<SentenceItem[]>([])
   const sentencesLoaded = ref(false)
 
-  // ── 全局UI状态 ────────────────────────────────────────
-
   const isLoading = ref(false)
   const globalMessage = ref<string | null>(null)
   const sidebarExpanded = ref(false)
 
-  // ── 阅读器状态 ────────────────────────────────────────
-
   const currentArticle = ref<ArticleItem | null>(null)
+  const currentEbook = ref<EbookItem | null>(null)
   const readerFontSize = ref<'small' | 'medium' | 'large'>('medium')
 
-  // OCR 导入草稿（跨页面传递）
   const pendingOcrDraft = ref<{ title: string; content: string } | null>(null)
 
-  // ── Computed ──────────────────────────────────────────
-
   const articlesCount = computed(() => articles.value.length)
+  const ebooksCount = computed(() => ebooks.value.length)
   const vocabularyCount = computed(() => vocabulary.value.length)
   const sentencesCount = computed(() => sentences.value.length)
 
@@ -45,12 +37,15 @@ export const useAppStore = defineStore('app', () => {
 
   const stats = computed(() => ({
     articles: articlesCount.value,
+    ebooks: ebooksCount.value,
     vocabulary: vocabularyCount.value,
     sentences: sentencesCount.value,
     totalWords: totalWordCount.value,
   }))
 
-  // ── Actions ───────────────────────────────────────────
+  const recentEbooks = computed(() =>
+    [...ebooks.value].sort((a, b) => (b.last_read_at || b.created_at) - (a.last_read_at || a.created_at))
+  )
 
   function setArticles(data: ArticleItem[]) {
     articles.value = data
@@ -69,6 +64,26 @@ export const useAppStore = defineStore('app', () => {
     const index = articles.value.findIndex(a => a.id === item.id)
     if (index > -1) {
       articles.value[index] = item
+    }
+  }
+
+  function setEbooks(data: EbookItem[]) {
+    ebooks.value = data
+    ebooksLoaded.value = true
+  }
+
+  function addEbook(item: EbookItem) {
+    ebooks.value.unshift(item)
+  }
+
+  function removeEbook(id: string) {
+    ebooks.value = ebooks.value.filter(item => item.id !== id)
+  }
+
+  function updateEbook(item: EbookItem) {
+    const index = ebooks.value.findIndex(entry => entry.id === item.id)
+    if (index > -1) {
+      ebooks.value[index] = item
     }
   }
 
@@ -108,9 +123,11 @@ export const useAppStore = defineStore('app', () => {
 
   function clearCache() {
     articles.value = []
+    ebooks.value = []
     vocabulary.value = []
     sentences.value = []
     articlesLoaded.value = false
+    ebooksLoaded.value = false
     vocabularyLoaded.value = false
     sentencesLoaded.value = false
   }
@@ -129,8 +146,6 @@ export const useAppStore = defineStore('app', () => {
     sidebarExpanded.value = !sidebarExpanded.value
   }
 
-  // ── Async Fetch Actions ────────────────────────────────
-
   async function fetchArticles(force = false) {
     if (articlesLoaded.value && !force) return articles.value
     try {
@@ -141,6 +156,19 @@ export const useAppStore = defineStore('app', () => {
       console.error('加载文章失败:', e)
       if (!articlesLoaded.value) setArticles([])
       return articles.value
+    }
+  }
+
+  async function fetchEbooks(force = false) {
+    if (ebooksLoaded.value && !force) return ebooks.value
+    try {
+      const data = await getEbooks()
+      setEbooks(data)
+      return data
+    } catch (e) {
+      console.error('加载图书失败:', e)
+      if (!ebooksLoaded.value) setEbooks([])
+      return ebooks.value
     }
   }
 
@@ -171,9 +199,10 @@ export const useAppStore = defineStore('app', () => {
   }
 
   return {
-    // State
     articles,
     articlesLoaded,
+    ebooks,
+    ebooksLoaded,
     vocabulary,
     vocabularyLoaded,
     sentences,
@@ -182,21 +211,26 @@ export const useAppStore = defineStore('app', () => {
     globalMessage,
     sidebarExpanded,
     currentArticle,
+    currentEbook,
     readerFontSize,
     pendingOcrDraft,
 
-    // Computed
     articlesCount,
+    ebooksCount,
     vocabularyCount,
     sentencesCount,
     totalWordCount,
     stats,
+    recentEbooks,
 
-    // Actions
     setArticles,
     addArticle,
     removeArticle,
     updateArticle,
+    setEbooks,
+    addEbook,
+    removeEbook,
+    updateEbook,
     setVocabulary,
     addVocabularyItem,
     removeVocabularyItem,
@@ -210,6 +244,7 @@ export const useAppStore = defineStore('app', () => {
     setPendingOcrDraft,
     consumePendingOcrDraft,
     fetchArticles,
+    fetchEbooks,
     fetchVocabulary,
     fetchSentences,
   }

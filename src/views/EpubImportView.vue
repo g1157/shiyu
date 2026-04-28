@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { marked } from 'marked'
 import { useRouter } from 'vue-router'
@@ -24,16 +24,17 @@ type ExtractedChapter = ChapterResult & {
   toc: TocEntryWithMeta
 }
 
-/** Render markdown with local image path resolution */
 function renderMarkdown(md: string): string {
   const resolved = resolveLocalImagesInMarkdown(md)
   return sanitizeRichHtml(resolveLocalImages(marked.parse(resolved) as string))
 }
-// Toggle raw markdown vs rendered preview
+
+function resolveImagePath(filePath: string): string {
+  return resolveLocalImages(`<img src="${filePath}" />`).match(/src="([^"]+)"/)?.[1] || filePath
+}
+
 const showRaw = ref<Record<number, boolean>>({})
 const extractProgress = ref(0)
-
-// Steps: 1=select, 2=toc, 3=result
 const step = ref(1)
 const filePath = ref('')
 const fileName = ref('')
@@ -45,17 +46,21 @@ const results = ref<ExtractedChapter[]>([])
 const savedCount = ref(0)
 const previewIndex = ref(-1)
 const importingBook = ref(false)
+const collapsedPaths = ref<Set<string>>(new Set())
 
 const hasSelection = computed(() => selectedPaths.value.size > 0)
 const selectionCount = computed(() => selectedPaths.value.size)
 const bookTitle = computed(() => fileName.value.replace(/\.epub$/i, ''))
+const hasParsedBook = computed(() => Boolean(filePath.value && toc.value.length > 0))
+const canImportBook = computed(() =>
+  hasParsedBook.value && !loading.value && !importingBook.value && !extracting.value,
+)
 
-// Flatten TOC for counting
 function flattenToc(entries: TocEntry[]): TocEntry[] {
   const flat: TocEntry[] = []
-  for (const e of entries) {
-    flat.push(e)
-    if (e.children?.length) flat.push(...flattenToc(e.children))
+  for (const entry of entries) {
+    flat.push(entry)
+    if (entry.children?.length) flat.push(...flattenToc(entry.children))
   }
   return flat
 }
@@ -99,13 +104,20 @@ async function selectFile() {
   try {
     const selected = await open({
       multiple: false,
-      filters: [{ name: 'EPUB', extensions: ['epub'] }]
+      filters: [{ name: 'EPUB', extensions: ['epub'] }],
     })
     if (!selected) return
 
     filePath.value = selected as string
     fileName.value = (selected as string).split(/[/\\]/).pop() || ''
     loading.value = true
+    step.value = 1
+    toc.value = []
+    selectedPaths.value = new Set()
+    results.value = []
+    previewIndex.value = -1
+    showRaw.value = {}
+    collapsedPaths.value = new Set()
 
     try {
       toc.value = await parseEpubToc(filePath.value)
@@ -120,14 +132,11 @@ async function selectFile() {
   }
 }
 
-
-
-// 级联选择：选中/取消父节点时自动覆盖所有子节点
 function getDescendantPaths(entries: TocEntry[]): string[] {
   const paths: string[] = []
-  for (const e of entries) {
-    paths.push(e.path)
-    if (e.children?.length) paths.push(...getDescendantPaths(e.children))
+  for (const entry of entries) {
+    paths.push(entry.path)
+    if (entry.children?.length) paths.push(...getDescendantPaths(entry.children))
   }
   return paths
 }
@@ -136,18 +145,16 @@ function toggleSelectWithChildren(entry: TocEntry) {
   const set = new Set(selectedPaths.value)
   const allPaths = [entry.path, ...getDescendantPaths(entry.children || [])]
   const isSelected = set.has(entry.path)
-  for (const p of allPaths) {
+  for (const path of allPaths) {
     if (isSelected) {
-      set.delete(p)
+      set.delete(path)
     } else {
-      set.add(p)
+      set.add(path)
     }
   }
   selectedPaths.value = set
 }
 
-// 折叠/展开状态
-const collapsedPaths = ref<Set<string>>(new Set())
 function toggleCollapse(path: string) {
   const set = new Set(collapsedPaths.value)
   if (set.has(path)) {
@@ -185,7 +192,7 @@ async function extractSelected() {
       ...result,
       markdown: stripLeadingDuplicateHeading(
         result.markdown,
-        entries[idx] ? [entries[idx].label, result.title] : [result.title]
+        entries[idx] ? [entries[idx].label, result.title] : [result.title],
       ),
       toc: entries[idx],
     }))
@@ -204,6 +211,7 @@ async function importCurrentFileAsBook() {
   importingBook.value = true
   try {
     const saved = await importEpubAsBook(filePath.value)
+    appStore.addEbook(saved)
     toast.success(`《${saved.title}》已导入书架`)
     await router.push({ path: '/books', query: { bookId: saved.id } })
   } catch (e: any) {
@@ -314,20 +322,20 @@ async function saveAllToArticles() {
   extracting.value = true
   let count = 0
   try {
-    for (const r of results.value) {
-      if (r.markdown) {
+    for (const result of results.value) {
+      if (result.markdown) {
         const saved = await addArticle({
-          title: r.toc.label || r.title || `章节 ${count + 1}`,
-          content: r.markdown,
+          title: result.toc.label || result.title || `章节 ${count + 1}`,
+          content: result.markdown,
           category: bookTitle.value,
-          description: buildChapterDescription(r),
+          description: buildChapterDescription(result),
         })
         appStore.addArticle(saved)
         count++
       }
     }
     savedCount.value += count
-    toast.success(`已保存 ${count} 篇文章到文章库`)
+    toast.success(`已保存 ${count} 篇文章到材料库`)
   } catch (e: any) {
     toast.error('批量保存失败: ' + e)
   } finally {
@@ -348,23 +356,12 @@ async function saveAsCombinedArticle() {
     })
     appStore.addArticle(saved)
     savedCount.value++
-    toast.success(`"${saved.title}" 已保存为保留目录层级的合集文章`)
+    toast.success(`"${saved.title}" 已保存为保留目录层级的合集材料`)
   } catch (e: any) {
     toast.error('保存合集失败: ' + e)
   } finally {
     extracting.value = false
   }
-}
-
-function reset() {
-  step.value = 1
-  filePath.value = ''
-  fileName.value = ''
-  toc.value = []
-  selectedPaths.value = new Set()
-  results.value = []
-  savedCount.value = 0
-  previewIndex.value = -1
 }
 
 function copyMarkdown(md: string) {
@@ -374,153 +371,219 @@ function copyMarkdown(md: string) {
 </script>
 
 <template>
-  <section class="page-container">
-    <!-- Step Indicator -->
-    <div class="steps-bar">
-      <div class="step-item" :class="{ active: step === 1, done: step > 1 }" @click="step > 1 && reset()">
-        <span class="step-num">1</span>
-        <span class="step-label">选择文件</span>
-      </div>
-      <div class="step-line" :class="{ done: step > 1 }"></div>
-      <div class="step-item" :class="{ active: step === 2, done: step > 2 }">
-        <span class="step-num">2</span>
-        <span class="step-label">选择章节</span>
-      </div>
-      <div class="step-line" :class="{ done: step > 2 }"></div>
-      <div class="step-item" :class="{ active: step === 3 }">
-        <span class="step-num">3</span>
-        <span class="step-label">提取结果</span>
-      </div>
-    </div>
-
-    <!-- Step 1: Select EPUB File -->
-    <div v-if="step === 1" class="step-content">
-      <div class="upload-area" @click="selectFile">
-        <div v-if="loading" class="spinner"></div>
-        <template v-else>
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          <h3>选择 EPUB 文件</h3>
-          <p>点击选择本地 EPUB 电子书，解析其中的章节目录</p>
-          <span class="supported-formats">支持格式: .epub</span>
-        </template>
-      </div>
-    </div>
-
-    <!-- Step 2: TOC Selection -->
-    <div v-if="step === 2" class="step-content">
-      <div class="toc-header">
-        <div class="toc-info">
-          <h2>{{ fileName }}</h2>
-          <span class="toc-count">共 {{ flatToc.length }} 个章节</span>
+  <section class="page-container epub-import-page">
+    <header class="intro-card panel-card">
+      <div class="intro-copy">
+        <span class="intro-kicker">阅读主入口</span>
+        <h1 class="intro-title">先把 EPUB 导入为图书，再开始阅读。</h1>
+        <p class="intro-subtitle">
+          默认主动作是把整本书放进书架并立即进入阅读。章节提取仍保留，但退到精读材料的次路径。
+        </p>
+        <div class="intro-actions">
+          <button class="btn btn-primary" @click="selectFile">
+            {{ filePath ? '重新选择 EPUB' : '选择 EPUB 文件' }}
+          </button>
+          <button class="btn btn-outline" :disabled="!canImportBook" @click="importCurrentFileAsBook">
+            {{ importingBook ? '导入图书中...' : '导入为图书并开始阅读' }}
+          </button>
         </div>
-        <div class="toc-actions">
-          <button class="btn-sm import-book" :disabled="extracting || importingBook || !filePath" @click="importCurrentFileAsBook">
-            {{ importingBook ? '导入图书中...' : '直接导入为图书' }}
-          </button>
-          <button class="btn-sm" @click="selectAll">全选</button>
-          <button class="btn-sm" @click="deselectAll">取消全选</button>
-          <button class="btn btn-primary" :disabled="!hasSelection || extracting" @click="extractSelected">
-            <span v-if="extracting" class="spinner-sm"></span>
-            {{ extracting ? `提取中 (${extractProgress}/${selectionCount})...` : `提取 ${selectionCount} 个章节` }}
-          </button>
+        <div class="intro-notes">
+          <span>主路径：导入 EPUB → 开始阅读 → 保存词句 → 进入复习</span>
+          <span v-if="fileName">当前文件：{{ fileName }}</span>
         </div>
       </div>
 
-      <div class="toc-list">
-        <template v-for="entry in toc" :key="entry.path + '-' + entry.index">
-          <div
-            class="toc-item"
-            :class="{ selected: selectedPaths.has(entry.path) }"
-            :style="{ paddingLeft: (16 + entry.level * 24) + 'px' }"
-            @click="toggleSelectWithChildren(entry)"
-          >
-            <!-- 展开/折叠箭头 -->
-            <span
-              v-if="entry.children && entry.children.length"
-              class="toc-toggle"
-              @click.stop="toggleCollapse(entry.path)"
-            >
-              <svg :class="{ collapsed: collapsedPaths.has(entry.path) }" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </span>
-            <span v-else class="toc-toggle-placeholder"></span>
-            <div class="toc-checkbox">
-              <svg v-if="selectedPaths.has(entry.path)" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-            </div>
-            <span class="toc-label">{{ entry.label }}</span>
-            <span v-if="entry.children && entry.children.length" class="toc-child-count">{{ entry.children.length }}</span>
+      <div class="intro-status">
+        <div class="status-card">
+          <span class="status-value">{{ filePath ? '1' : '0' }}</span>
+          <span class="status-label">已选择文件</span>
+        </div>
+        <div class="status-card">
+          <span class="status-value">{{ flatToc.length }}</span>
+          <span class="status-label">可读章节</span>
+        </div>
+        <div class="status-card">
+          <span class="status-value">{{ selectionCount }}</span>
+          <span class="status-label">已选节选</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="primary-flow panel-card">
+      <div class="section-head">
+        <div>
+          <h2>导入为图书</h2>
+          <p>这是默认主路径。导入完成后会直接跳到书架并打开这本书。</p>
+        </div>
+        <button class="btn btn-primary" :disabled="!canImportBook" @click="importCurrentFileAsBook">
+          {{ importingBook ? '导入图书中...' : '导入为图书并开始阅读' }}
+        </button>
+      </div>
+
+      <div v-if="loading" class="loading-card">
+        <div class="spinner"></div>
+        <span>正在解析 EPUB 目录...</span>
+      </div>
+
+      <div v-else-if="!filePath" class="empty-card">
+        <p>先选择一本 EPUB，系统会解析目录，然后你可以直接导入整本书开始阅读。</p>
+      </div>
+
+      <div v-else class="file-summary">
+        <div class="file-summary__main">
+          <div class="file-name">{{ fileName }}</div>
+          <div class="file-meta">共 {{ flatToc.length }} 个章节，适合直接进入连续阅读。</div>
+        </div>
+        <button class="btn-sm" @click="selectFile">更换文件</button>
+      </div>
+    </section>
+
+    <section class="secondary-flow panel-card">
+      <div class="section-head section-head--secondary">
+        <div>
+          <span class="section-tag">次路径</span>
+          <h2>提取节选到精读材料</h2>
+          <p>只有当你想把部分章节沉淀为材料时，再走这条路径。</p>
+        </div>
+        <button class="btn-sm" :disabled="!hasParsedBook" @click="selectAll">全选章节</button>
+      </div>
+
+      <div v-if="!hasParsedBook" class="empty-card empty-card--subtle">
+        <p>选好 EPUB 后，这里才会显示章节目录和节选保存能力。</p>
+      </div>
+
+      <template v-else>
+        <div class="toc-toolbar">
+          <div class="toc-info">
+            <strong>{{ fileName }}</strong>
+            <span>已解析 {{ flatToc.length }} 个章节</span>
           </div>
-          <!-- 递归渲染子目录 -->
-          <template v-if="entry.children && entry.children.length && !collapsedPaths.has(entry.path)">
-            <template v-for="child in entry.children" :key="child.path + '-' + child.index">
-              <div
-                class="toc-item"
-                :class="{ selected: selectedPaths.has(child.path) }"
-                :style="{ paddingLeft: (16 + child.level * 24) + 'px' }"
-                @click="toggleSelectWithChildren(child)"
+          <div class="toc-actions">
+            <button class="btn-sm" @click="selectAll">全选</button>
+            <button class="btn-sm" @click="deselectAll">取消全选</button>
+            <button class="btn btn-primary" :disabled="!hasSelection || extracting" @click="extractSelected">
+              <span v-if="extracting" class="spinner-sm"></span>
+              {{ extracting ? `提取中 (${extractProgress}/${selectionCount})...` : `提取 ${selectionCount} 个章节` }}
+            </button>
+          </div>
+        </div>
+
+        <div class="toc-list">
+          <template v-for="entry in toc" :key="entry.path + '-' + entry.index">
+            <div
+              class="toc-item"
+              :class="{ selected: selectedPaths.has(entry.path) }"
+              :style="{ paddingLeft: 16 + entry.level * 24 + 'px' }"
+              role="checkbox"
+              :aria-checked="selectedPaths.has(entry.path)"
+              :aria-label="`选择章节 ${entry.label}`"
+              tabindex="0"
+              @click="toggleSelectWithChildren(entry)"
+              @keydown.enter.prevent="toggleSelectWithChildren(entry)"
+              @keydown.space.prevent="toggleSelectWithChildren(entry)"
+            >
+              <button
+                v-if="entry.children && entry.children.length"
+                type="button"
+                class="toc-toggle"
+                :aria-expanded="!collapsedPaths.has(entry.path)"
+                :aria-label="collapsedPaths.has(entry.path) ? '展开子章节' : '折叠子章节'"
+                @click.stop="toggleCollapse(entry.path)"
               >
-                <span
-                  v-if="child.children && child.children.length"
-                  class="toc-toggle"
-                  @click.stop="toggleCollapse(child.path)"
-                >
-                  <svg :class="{ collapsed: collapsedPaths.has(child.path) }" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="6 9 12 15 18 9"/>
-                  </svg>
-                </span>
-                <span v-else class="toc-toggle-placeholder"></span>
-                <div class="toc-checkbox">
-                  <svg v-if="selectedPaths.has(child.path)" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                </div>
-                <span class="toc-label">{{ child.label }}</span>
-                <span v-if="child.children && child.children.length" class="toc-child-count">{{ child.children.length }}</span>
+                <svg :class="{ collapsed: collapsedPaths.has(entry.path) }" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+              <span v-else class="toc-toggle-placeholder"></span>
+              <div class="toc-checkbox">
+                <svg v-if="selectedPaths.has(entry.path)" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
               </div>
-              <!-- 第 3 层子级 -->
-              <template v-if="child.children && child.children.length && !collapsedPaths.has(child.path)">
+              <span class="toc-label">{{ entry.label }}</span>
+              <span v-if="entry.children && entry.children.length" class="toc-child-count">{{ entry.children.length }}</span>
+            </div>
+
+            <template v-if="entry.children && entry.children.length && !collapsedPaths.has(entry.path)">
+              <template v-for="child in entry.children" :key="child.path + '-' + child.index">
                 <div
-                  v-for="grandchild in child.children"
-                  :key="grandchild.path + '-' + grandchild.index"
                   class="toc-item"
-                  :class="{ selected: selectedPaths.has(grandchild.path) }"
-                  :style="{ paddingLeft: (16 + grandchild.level * 24) + 'px' }"
-                  @click="toggleSelectWithChildren(grandchild)"
+                  :class="{ selected: selectedPaths.has(child.path) }"
+                  :style="{ paddingLeft: 16 + child.level * 24 + 'px' }"
+                  role="checkbox"
+                  :aria-checked="selectedPaths.has(child.path)"
+                  :aria-label="`选择章节 ${child.label}`"
+                  tabindex="0"
+                  @click="toggleSelectWithChildren(child)"
+                  @keydown.enter.prevent="toggleSelectWithChildren(child)"
+                  @keydown.space.prevent="toggleSelectWithChildren(child)"
                 >
-                  <span class="toc-toggle-placeholder"></span>
+                  <button
+                    v-if="child.children && child.children.length"
+                    type="button"
+                    class="toc-toggle"
+                    :aria-expanded="!collapsedPaths.has(child.path)"
+                    :aria-label="collapsedPaths.has(child.path) ? '展开子章节' : '折叠子章节'"
+                    @click.stop="toggleCollapse(child.path)"
+                  >
+                    <svg :class="{ collapsed: collapsedPaths.has(child.path) }" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                  </button>
+                  <span v-else class="toc-toggle-placeholder"></span>
                   <div class="toc-checkbox">
-                    <svg v-if="selectedPaths.has(grandchild.path)" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <svg v-if="selectedPaths.has(child.path)" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
                   </div>
-                  <span class="toc-label">{{ grandchild.label }}</span>
+                  <span class="toc-label">{{ child.label }}</span>
+                  <span v-if="child.children && child.children.length" class="toc-child-count">{{ child.children.length }}</span>
                 </div>
+
+                <template v-if="child.children && child.children.length && !collapsedPaths.has(child.path)">
+                  <div
+                    v-for="grandchild in child.children"
+                    :key="grandchild.path + '-' + grandchild.index"
+                    class="toc-item"
+                    :class="{ selected: selectedPaths.has(grandchild.path) }"
+                    :style="{ paddingLeft: 16 + grandchild.level * 24 + 'px' }"
+                    role="checkbox"
+                    :aria-checked="selectedPaths.has(grandchild.path)"
+                    :aria-label="`选择章节 ${grandchild.label}`"
+                    tabindex="0"
+                    @click="toggleSelectWithChildren(grandchild)"
+                    @keydown.enter.prevent="toggleSelectWithChildren(grandchild)"
+                    @keydown.space.prevent="toggleSelectWithChildren(grandchild)"
+                  >
+                    <span class="toc-toggle-placeholder"></span>
+                    <div class="toc-checkbox">
+                      <svg v-if="selectedPaths.has(grandchild.path)" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                    </div>
+                    <span class="toc-label">{{ grandchild.label }}</span>
+                  </div>
+                </template>
               </template>
             </template>
           </template>
-        </template>
-      </div>
-    </div>
+        </div>
+      </template>
+    </section>
 
-    <!-- Step 3: Results -->
-    <div v-if="step === 3" class="step-content">
-      <div class="result-header">
-        <h2>提取完成</h2>
+    <section v-if="step === 3" class="results-panel panel-card">
+      <div class="section-head">
+        <div>
+          <h2>节选结果</h2>
+          <p>节选已提取完成，可以沉淀到精读材料库。</p>
+        </div>
         <div class="result-actions">
           <button class="btn btn-primary" @click="saveAsCombinedArticle" :disabled="extracting || !results.length">
-            {{ extracting ? '保存中...' : '保存为一本合集文章' }}
+            {{ extracting ? '保存中...' : '保存为一本合集材料' }}
           </button>
           <button class="btn-sm" @click="saveAllToArticles" :disabled="extracting || !results.length">
             {{ `按章节分别保存 (${results.length})` }}
           </button>
-          <button class="btn-sm" @click="reset">重新选择</button>
         </div>
       </div>
 
@@ -530,8 +593,8 @@ function copyMarkdown(md: string) {
           <div class="summary-desc">{{ combinedDescription }}</div>
         </div>
         <div class="summary-side">
-          <span class="summary-badge">推荐</span>
-          <span>按目录顺序合并</span>
+          <span class="summary-badge">次路径</span>
+          <span>适合做后续精读</span>
         </div>
       </div>
 
@@ -558,26 +621,22 @@ function copyMarkdown(md: string) {
 
           <transition name="expand">
             <div v-if="previewIndex === idx" class="result-preview">
-              <!-- Toggle between rendered and raw -->
               <div class="preview-toolbar">
                 <button class="btn-sm" :class="{ active: !showRaw[idx] }" @click="showRaw[idx] = false">渲染预览</button>
                 <button class="btn-sm" :class="{ active: showRaw[idx] }" @click="toggleRaw(idx)">原始 Markdown</button>
                 <span v-if="result.images.length" class="img-badge">{{ result.images.length }} 张图片</span>
               </div>
-              <!-- Rendered Markdown preview -->
               <div
                 v-if="!showRaw[idx]"
                 class="rendered-preview reader-typography"
                 v-html="renderMarkdown(result.markdown) || '<p>无内容</p>'"
               ></div>
-              <!-- Raw Markdown -->
               <pre v-else class="markdown-preview">{{ result.markdown }}</pre>
-              <!-- Image Gallery (always shown if images exist) -->
               <div v-if="result.images && result.images.length" class="image-gallery">
                 <div class="gallery-title">章节图片 ({{ result.images.length }})</div>
                 <div class="gallery-grid">
                   <div v-for="(img, imgIdx) in result.images" :key="imgIdx" class="gallery-item">
-                    <img :src="'data:' + img.mime_type + ';base64,' + img.data_base64" :alt="img.filename" />
+                    <img :src="resolveImagePath(img.data_base64)" :alt="img.filename" />
                     <span>{{ img.filename }}</span>
                   </div>
                 </div>
@@ -586,116 +645,237 @@ function copyMarkdown(md: string) {
           </transition>
         </div>
       </div>
-    </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.page-container {
-  max-width: 100%;
-  padding: 1.5rem 2rem 2rem;
-}
-
-/* Steps Bar */
-.steps-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  margin-bottom: 2rem;
-  padding: 0 2rem;
-}
-
-.step-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 10px;
-  cursor: default;
-  transition: all 0.2s;
-}
-
-.step-item.active { background: linear-gradient(135deg, #007AFF, #409CFF); }
-.step-item.active .step-num { background: rgba(255,255,255,0.25); color: #fff; }
-.step-item.active .step-label { color: #fff; font-weight: 700; }
-
-.step-item.done { cursor: pointer; }
-.step-item.done .step-num { background: #10b981; color: #fff; }
-.step-item.done .step-label { color: #10b981; }
-
-.step-num {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  font-weight: 700;
-  background: var(--c-border);
-  color: var(--c-text-lighter);
-}
-
-.step-label { font-size: 0.9rem; color: var(--c-text-lighter); white-space: nowrap; }
-
-.step-line {
-  width: 50px;
-  height: 2px;
-  background: var(--c-border);
-  margin: 0 4px;
-  transition: background 0.3s;
-}
-
-.step-line.done { background: #10b981; }
-
-/* Upload Area */
-.upload-area {
+.epub-import-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 28px 36px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.8rem;
-  padding: 4rem 2rem;
-  border: 2px dashed var(--c-border);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.6);
-  cursor: pointer;
-  transition: all 0.3s ease;
-  text-align: center;
+  gap: 18px;
 }
 
-.upload-area:hover {
-  border-color: #007AFF;
-  background: rgba(0, 122, 255, 0.04);
-  transform: translateY(-2px);
+.panel-card {
+  border-radius: 24px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-1);
+  box-shadow: var(--c-shadow-md);
 }
 
-.upload-area svg { color: var(--c-text-lighter); }
-.upload-area:hover svg { color: #007AFF; }
-.upload-area h3 { margin: 0; font-size: 1.2rem; color: var(--c-text); }
-.upload-area p { margin: 0; font-size: 0.9rem; color: var(--c-text-lighter); }
-.supported-formats { font-size: 0.8rem; color: var(--c-text-lighter); }
+.intro-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr);
+  gap: 18px;
+  padding: 24px;
+  border-color: var(--c-border-strong);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c-surface-1) 94%, transparent), var(--c-surface-2));
+}
 
-/* TOC */
-.toc-header {
+.intro-copy {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  flex-direction: column;
+}
+
+.intro-kicker {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--c-accent-pill);
+  color: var(--c-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.intro-title {
+  margin: 14px 0 10px;
+  font-size: 2rem;
+  line-height: 1.15;
+  color: var(--c-text);
+}
+
+.intro-subtitle {
+  margin: 0;
+  max-width: 700px;
+  color: var(--c-text-lighter);
+  line-height: 1.75;
+}
+
+.intro-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 22px;
   flex-wrap: wrap;
 }
 
-.toc-info h2 { margin: 0; font-size: 1.2rem; color: var(--c-text); }
-.toc-count { font-size: 0.85rem; color: var(--c-text-lighter); }
-.toc-actions { display: flex; gap: 8px; align-items: center; }
+.intro-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  color: var(--c-text-lighter);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.intro-status {
+  display: grid;
+  gap: 12px;
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 96px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+}
+
+.status-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--c-text);
+}
+
+.status-label {
+  margin-top: 4px;
+  color: var(--c-text-lighter);
+  font-size: 0.86rem;
+}
+
+.primary-flow,
+.secondary-flow,
+.results-panel {
+  padding: 22px;
+}
+
+.secondary-flow {
+  background: var(--c-surface-2);
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 1.22rem;
+  color: var(--c-text);
+}
+
+.section-head p {
+  margin: 6px 0 0;
+  color: var(--c-text-lighter);
+  line-height: 1.7;
+}
+
+.section-tag {
+  display: inline-flex;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--c-accent-pill);
+  color: var(--c-primary);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.loading-card,
+.empty-card,
+.file-summary,
+.result-summary {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+}
+
+.loading-card,
+.empty-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 120px;
+  text-align: center;
+  color: var(--c-text-lighter);
+}
+
+.empty-card--subtle {
+  min-height: 100px;
+}
+
+.file-summary,
+.result-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.file-name,
+.summary-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--c-text);
+}
+
+.file-meta,
+.summary-desc {
+  margin-top: 4px;
+  color: var(--c-text-lighter);
+}
+
+.toc-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.toc-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toc-info span {
+  color: var(--c-text-lighter);
+  font-size: 0.88rem;
+}
+
+.toc-actions,
+.result-actions,
+.result-btns,
+.preview-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 
 .toc-list {
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  border-radius: 18px;
   overflow: hidden;
-  background: var(--c-bg-light);
+  background: var(--c-surface-1);
 }
 
 .toc-item {
@@ -704,14 +884,22 @@ function copyMarkdown(md: string) {
   gap: 12px;
   padding: 12px 16px;
   cursor: pointer;
-  border-bottom: 1px solid var(--c-border-light, #f1f5f9);
-  transition: all 0.15s;
+  border-bottom: 1px solid var(--c-border-light);
+  transition: background 0.18s ease, border-color 0.18s ease;
 }
 
-.toc-item:last-child { border-bottom: none; }
-.toc-item:hover { background: var(--c-bg-lighter); }
-.toc-item.selected { background: var(--c-bg-lighter); }
-.toc-child { padding-left: 40px; }
+.toc-item:last-child {
+  border-bottom: none;
+}
+
+.toc-item:hover,
+.toc-item.selected {
+  background: var(--c-hover-bg);
+}
+
+.toc-item.selected {
+  border-color: var(--c-accent-border);
+}
 
 .toc-toggle {
   width: 20px;
@@ -722,11 +910,23 @@ function copyMarkdown(md: string) {
   cursor: pointer;
   flex-shrink: 0;
   color: var(--c-text-lighter);
-  border-radius: 4px;
-  transition: all 0.15s;
+  border: none;
+  padding: 0;
+  background: transparent;
+  border-radius: 6px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.toc-toggle:hover { background: var(--c-border); color: var(--c-text-lighter); }
+.toc-item:focus-visible,
+.toc-toggle:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+}
+
+.toc-toggle:hover {
+  background: var(--c-selected-bg);
+  color: var(--c-text);
+}
 
 .toc-toggle svg {
   transition: transform 0.2s;
@@ -741,33 +941,26 @@ function copyMarkdown(md: string) {
   flex-shrink: 0;
 }
 
-.toc-child-count {
-  font-size: 0.7rem;
-  color: var(--c-text-lighter);
-  background: var(--c-border-light, #f1f5f9);
-  padding: 1px 6px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
 .toc-checkbox {
   width: 22px;
   height: 22px;
-  border: 2px solid var(--c-border);
+  border: 1.5px solid var(--c-border-strong);
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: all 0.15s;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .toc-item.selected .toc-checkbox {
-  background: linear-gradient(135deg, #007AFF, #409CFF);
-  border-color: transparent;
+  background: var(--c-primary);
+  border-color: var(--c-primary);
 }
 
-.toc-item.selected .toc-checkbox svg { color: #fff; }
+.toc-item.selected .toc-checkbox svg {
+  color: #fff;
+}
 
 .toc-label {
   font-size: 0.95rem;
@@ -779,50 +972,41 @@ function copyMarkdown(md: string) {
   white-space: nowrap;
 }
 
-/* Buttons */
-/* btn-primary 继承自 App.vue 全局样式 */
+.toc-child-count {
+  font-size: 0.72rem;
+  color: var(--c-text-lighter);
+  background: var(--c-selected-bg);
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
 
 .btn-sm {
-  padding: 5px 12px;
-  border: 1.5px solid var(--c-border);
-  border-radius: 8px;
-  background: var(--c-bg-light);
+  padding: 6px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface-1);
   color: var(--c-text);
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.btn-sm:hover { border-color: var(--c-primary); color: var(--c-primary); background: rgba(0, 122, 255, 0.04); }
-.btn-sm.save { border-color: #86efac; color: #15803d; background: #f0fdf4; }
-.btn-sm.save:hover { background: #dcfce7; }
-.btn-sm.import-book { border-color: #bfdbfe; color: #1d4ed8; background: #eff6ff; }
-.btn-sm.import-book:hover { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
-
-/* Results */
-.result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-  gap: 1rem;
+.btn-sm:hover {
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  background: var(--c-hover-bg);
 }
 
-.result-header h2 { margin: 0; font-size: 1.2rem; }
-.result-actions { display: flex; gap: 8px; }
+.btn-sm.save {
+  border-color: rgba(22, 163, 74, 0.22);
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.08);
+}
 
-.result-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  padding: 14px 16px;
-  border: 1px solid #bfdbfe;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(99, 102, 241, 0.04));
+.btn-sm.save:hover {
+  background: rgba(22, 163, 74, 0.14);
 }
 
 .summary-main {
@@ -831,55 +1015,56 @@ function copyMarkdown(md: string) {
   gap: 4px;
 }
 
-.summary-title {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--c-text);
-}
-
-.summary-desc {
-  font-size: 0.85rem;
-  color: var(--c-text-lighter);
-}
-
 .summary-side {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 0.82rem;
-  color: #1d4ed8;
+  color: var(--c-primary);
   white-space: nowrap;
 }
 
 .summary-badge {
   padding: 3px 8px;
   border-radius: 999px;
-  background: #2563eb;
-  color: #fff;
+  background: var(--c-accent-pill);
+  color: var(--c-primary);
   font-weight: 700;
 }
 
-.result-list { display: flex; flex-direction: column; gap: 8px; }
+.result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 .result-card {
   border: 1px solid var(--c-border);
-  border-radius: 14px;
-  background: var(--c-bg-light);
+  border-radius: 18px;
+  background: var(--c-surface-1);
   overflow: hidden;
-  transition: all 0.2s;
+  transition: border-color 0.18s ease, transform 0.18s ease;
 }
 
-.result-card:hover { border-color: #bae6fd; }
+.result-card:hover {
+  border-color: var(--c-border-strong);
+  transform: translateY(-1px);
+}
 
 .result-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  gap: 14px;
+  padding: 16px 18px;
   cursor: pointer;
 }
 
-.result-info h3 { margin: 0 0 2px; font-size: 1rem; color: var(--c-text); }
+.result-info h3 {
+  margin: 0 0 2px;
+  font-size: 1rem;
+  color: var(--c-text);
+}
 
 .result-path {
   font-size: 0.8rem;
@@ -893,12 +1078,7 @@ function copyMarkdown(md: string) {
   gap: 12px;
   font-size: 0.8rem;
   color: var(--c-text-lighter);
-}
-
-.result-btns {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .result-btns svg {
@@ -907,25 +1087,24 @@ function copyMarkdown(md: string) {
   flex-shrink: 0;
 }
 
-.result-btns svg.rotated { transform: rotate(180deg); }
+.result-btns svg.rotated {
+  transform: rotate(180deg);
+}
 
 .result-preview {
-  border-top: 1px solid var(--c-border-light, #f1f5f9);
+  border-top: 1px solid var(--c-border-light);
   padding: 16px;
-  background: var(--c-bg-lighter);
+  background: var(--c-surface-2);
 }
 
 .preview-toolbar {
-  display: flex;
-  gap: 6px;
-  align-items: center;
   margin-bottom: 12px;
 }
 
 .preview-toolbar .btn-sm.active {
-  background: #007AFF;
+  background: var(--c-primary);
   color: #fff;
-  border-color: #007AFF;
+  border-color: var(--c-primary);
 }
 
 .img-badge {
@@ -936,9 +1115,9 @@ function copyMarkdown(md: string) {
 
 .rendered-preview {
   padding: 1rem;
-  background: var(--c-bg-light);
+  background: var(--c-surface-1);
   border: 1px solid var(--c-border);
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 0.95rem;
   line-height: 1.8;
   color: var(--c-text);
@@ -952,17 +1131,12 @@ function copyMarkdown(md: string) {
   margin: 8px 0;
 }
 
-.rendered-preview h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; color: var(--c-text); }
-.rendered-preview h2 { font-size: 1.3rem; font-weight: 700; margin: 1rem 0 0.5rem; color: var(--c-text); }
-.rendered-preview h3 { font-size: 1.1rem; font-weight: 600; margin: 0.8rem 0 0.4rem; color: var(--c-text); }
-.rendered-preview p { margin: 0.5rem 0; }
-
 .markdown-preview {
   margin: 0;
   padding: 1rem;
   background: var(--c-bg-lighter);
   border: 1px solid var(--c-border);
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 0.85rem;
   line-height: 1.6;
   color: var(--c-text);
@@ -973,7 +1147,6 @@ function copyMarkdown(md: string) {
   font-family: var(--font-mono);
 }
 
-/* Image Gallery */
 .image-gallery {
   margin-top: 16px;
   border-top: 1px solid var(--c-border);
@@ -1006,7 +1179,7 @@ function copyMarkdown(md: string) {
   border-radius: 8px;
   border: 1px solid var(--c-border);
   object-fit: contain;
-  background: var(--c-bg-light);
+  background: var(--c-surface-1);
 }
 
 .gallery-item span {
@@ -1014,12 +1187,11 @@ function copyMarkdown(md: string) {
   color: var(--c-text-lighter);
 }
 
-/* Spinner */
 .spinner {
   width: 40px;
   height: 40px;
   border: 3px solid var(--c-border);
-  border-top-color: #007AFF;
+  border-top-color: var(--c-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -1027,23 +1199,46 @@ function copyMarkdown(md: string) {
 .spinner-sm {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 2px solid rgba(255, 255, 255, 0.3);
   border-top-color: #fff;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
-/* Transition */
-.expand-enter-active, .expand-leave-active { transition: all 0.3s ease; }
-.expand-enter-from, .expand-leave-to { opacity: 0; max-height: 0; padding: 0 16px; }
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.3s ease;
+}
 
-.rendered-preview-iframe {
-  width: 100%;
-  min-height: 400px;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  background: var(--c-bg-light);
+.expand-enter-from,
+.expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding: 0 16px;
+}
+
+@media (max-width: 960px) {
+  .epub-import-page {
+    padding: 18px 16px 30px;
+  }
+
+  .intro-card {
+    grid-template-columns: 1fr;
+  }
+
+  .file-summary,
+  .toc-toolbar,
+  .section-head,
+  .result-summary,
+  .result-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

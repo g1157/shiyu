@@ -249,9 +249,6 @@ const currentTheme = computed<'light' | 'dark'>(() => (settingsStore.theme === '
 const readerShellStyle = computed(() => ({
   '--book-reader-host-width': bookReaderWidthMap[readerWidth.value],
 }))
-const readerToolbarTitle = computed(() => currentEbook.value?.title || props.ebook.title)
-const readerToolbarSubtitle = computed(() => currentChapter.value || '正在加载章节')
-
 const BOOK_READER_THEME_NAME = 'app-book-theme'
 const registeredReaderThemes = new Set<string>()
 
@@ -1001,10 +998,10 @@ function getShellScrollContainer(): HTMLElement {
 function readStoredTocVisibility(): boolean {
   try {
     const raw = localStorage.getItem(TOC_PANEL_STORAGE_KEY)
-    if (raw == null) return true
+    if (raw == null) return false
     return raw === '1'
   } catch {
-    return true
+    return false
   }
 }
 
@@ -1389,6 +1386,82 @@ function currentLocationHref() {
     return location.start.href as string
   }
   return null
+}
+
+function getSpineHrefCandidates(href?: string | null): string[] {
+  const target = normalizeHref(href || undefined).replace(/^\/+/, '')
+  if (!target) return []
+
+  const targetFileName = target.split('/').pop()
+  const spineItems = bookInstance?.spine?.spineItems
+  if (!Array.isArray(spineItems)) return []
+
+  return spineItems
+    .map((section: any) => String(section?.href || '').replace(/^\/+/, ''))
+    .filter((sectionHref: string) => {
+      const sectionFileName = sectionHref.split('/').pop()
+      return sectionHref === target
+        || sectionHref.endsWith(`/${target}`)
+        || target.endsWith(`/${sectionHref}`)
+        || (!!targetFileName && sectionFileName === targetFileName)
+    })
+}
+
+function buildHrefDisplayTargets(href?: string | null): Array<string | undefined> {
+  const value = href?.trim()
+  if (!value) return []
+
+  const withoutFragment = normalizeHref(value)
+  const withoutLeadingSlash = value.replace(/^\/+/, '')
+  const normalizedWithoutLeadingSlash = withoutFragment.replace(/^\/+/, '')
+
+  return [
+    ...getSpineHrefCandidates(value),
+    value,
+    withoutFragment,
+    withoutLeadingSlash,
+    normalizedWithoutLeadingSlash,
+  ]
+}
+
+function isSameDisplayTarget(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false
+  return normalizeHref(a).replace(/^\/+/, '') === normalizeHref(b).replace(/^\/+/, '')
+}
+
+function canResolveDisplayTarget(target?: string | null): boolean {
+  if (!bookInstance?.spine?.get) return true
+  try {
+    return Boolean(bookInstance.spine.get(target ?? undefined))
+  } catch (e) {
+    console.warn('EPUB section 预解析失败:', target, e)
+    return false
+  }
+}
+
+async function displayFirstAvailable(targets: Array<string | undefined | null>): Promise<string | undefined> {
+  if (!rendition) throw new Error('阅读器未初始化')
+
+  const seen = new Set<string>()
+  const candidates = targets.filter((target) => {
+    const key = target ?? '__default__'
+    if (seen.has(key)) return false
+    seen.add(key)
+    return canResolveDisplayTarget(target)
+  })
+  let lastError: unknown = null
+
+  for (const target of candidates) {
+    try {
+      await rendition.display(target ?? undefined)
+      return target ?? undefined
+    } catch (e) {
+      lastError = e
+      console.warn('EPUB 定位失败，尝试下一个位置:', target, e)
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || 'No Section Found'))
 }
 
 function hasMeaningfulRenderedText(): boolean {
@@ -1891,7 +1964,12 @@ async function initReader() {
     expandedTocKeys.value = loadExpandedTocState(latest.id)
     currentChapter.value = toc.value[0]?.label || ''
     const initialTocHref = resolveInitialTocHref()
-    const initialTarget = props.focusCfi || currentEbook.value.cfi_position || initialTocHref || undefined
+    const initialTargets = [
+      props.focusCfi,
+      currentEbook.value.cfi_position,
+      ...buildHrefDisplayTargets(initialTocHref),
+      undefined,
+    ]
 
     // Reader behaviors come from our own hooks; keep untrusted EPUB scripts disabled.
     rendition = bookInstance.renderTo(readerHostRef.value, {
@@ -1910,13 +1988,11 @@ async function initReader() {
     })
     rendition.on('relocated', handleRelocated)
     rendition.on('selected', handleSelected)
-    await rendition.display(initialTarget)
+    const displayedTarget = await displayFirstAvailable(initialTargets)
     await finalizeDisplayedContent()
 
-    // Some EPUBs place cover / front-matter ahead of the actual TOC chapter.
-    // If first open lands on an effectively empty page, fall back to the first TOC entry.
-    if (!props.focusCfi && initialTocHref && initialTarget !== initialTocHref && !hasMeaningfulRenderedText()) {
-      await rendition.display(initialTocHref)
+    if (!props.focusCfi && initialTocHref && !isSameDisplayTarget(displayedTarget, initialTocHref) && !hasMeaningfulRenderedText()) {
+      await displayFirstAvailable(buildHrefDisplayTargets(initialTocHref))
       await finalizeDisplayedContent()
     }
 
@@ -1937,7 +2013,7 @@ async function openChapter(item: TocNode) {
   if (!rendition || !item.href) return
   removeInlineSentenceTranslation()
   clearSelection()
-  await rendition.display(item.href || normalizeHref(item.href))
+  await displayFirstAvailable(buildHrefDisplayTargets(item.href))
   await finalizeDisplayedContent()
   currentChapter.value = item.label
 }
@@ -1955,6 +2031,7 @@ function nextPage() {
 }
 
 onMounted(() => {
+  document.documentElement.classList.add('book-reader-active')
   void initReader()
   readerShellRef.value?.addEventListener('wheel', handleReaderWheel, { passive: false })
   getShellScrollContainer().addEventListener('scroll', scheduleQuickLookupPanelPositionUpdate, { passive: true })
@@ -1970,6 +2047,7 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  document.documentElement.classList.remove('book-reader-active')
   readerShellRef.value?.removeEventListener('wheel', handleReaderWheel)
   getShellScrollContainer().removeEventListener('scroll', scheduleQuickLookupPanelPositionUpdate)
   getShellScrollContainer().removeEventListener('scroll', updateToolbarVisibility)
@@ -2011,7 +2089,7 @@ watch(
     if (!newCfi || newCfi === oldCfi || !rendition) return
     clearSelection()
     setActiveHighlight(props.highlightId, props.highlightType)
-    await rendition.display(newCfi)
+    await displayFirstAvailable([newCfi, ...buildHrefDisplayTargets(resolveInitialTocHref()), undefined])
     await finalizeDisplayedContent()
   },
 )
@@ -2062,19 +2140,19 @@ watch(readerWidth, async () => {
 
 <template>
   <section ref="readerShellRef" class="book-reader" :style="readerShellStyle">
-    <transition name="slide-down">
-      <div v-if="showTopToolbar" class="reader-toolbar glass-card">
-        <div class="reader-actions">
-          <button class="header-btn" @click="emit('close')">← 返回书架</button>
-          <button class="header-btn" @click="showToc = !showToc">{{ showToc ? '隐藏目录' : '显示目录' }}</button>
+    <button v-if="!showToc" class="reader-open-toc header-btn" @click="showToc = true">
+      ☰
+    </button>
+
+    <div class="reader-layout" :class="{ 'reader-layout--no-toc': !showToc }">
+      <aside v-if="showToc" class="reader-toc glass-card">
+        <div class="reader-actions reader-actions--toc">
+          <button class="header-btn" @click="emit('close')">← 书架</button>
+          <button class="header-btn" @click="showToc = false">隐藏</button>
           <button class="header-btn" @click="prevPage">上一页</button>
           <button class="header-btn primary" @click="nextPage">下一页</button>
         </div>
-        <div class="reader-toolbar-title">
-          <div class="reader-toolbar-title__main">{{ readerToolbarTitle }}</div>
-          <div class="reader-toolbar-title__sub">{{ readerToolbarSubtitle }}</div>
-        </div>
-        <div class="reader-toolbar-meta">
+        <div class="toc-display-actions">
           <button class="header-btn reader-display-btn" @click="cycleFontSize" :title="'字号: ' + bookReaderFontSizeLabel[fontSize]">
             字号 {{ bookReaderFontSizeLabel[fontSize] }}
           </button>
@@ -2084,16 +2162,7 @@ watch(readerWidth, async () => {
           <button class="header-btn reader-display-btn" @click="cycleReaderDensity" :title="'正文比例: ' + bookReaderDensityLabel[readerDensity]">
             比例 {{ bookReaderDensityLabel[readerDensity] }}
           </button>
-          <span class="reader-progress-pill">{{ progressPercent }}%</span>
         </div>
-      </div>
-    </transition>
-
-    <div class="reader-layout" :class="{ 'reader-layout--no-toc': !showToc }">
-      <aside v-if="showToc" class="reader-toc glass-card">
-        <button class="reader-edge-toggle header-btn header-btn--toc" @click="showToc = false">
-          隐藏目录
-        </button>
         <div class="toc-book-meta">
           <h1 class="reader-title">{{ currentEbook?.title || ebook.title }}</h1>
           <p class="reader-subtitle">
@@ -2149,18 +2218,6 @@ watch(readerWidth, async () => {
           </div>
         </div>
       </aside>
-
-      <div v-else class="reader-mini-meta glass-card">
-        <button class="reader-edge-toggle header-btn header-btn--toc" @click="showToc = true">
-          显示目录
-        </button>
-        <div class="reader-mini-title">{{ currentEbook?.title || ebook.title }}</div>
-        <div class="reader-mini-subtitle">
-          <span v-if="currentEbook?.author">{{ currentEbook.author }}</span>
-          <span>{{ currentChapter || '正在加载章节' }}</span>
-          <span>{{ progressPercent }}%</span>
-        </div>
-      </div>
 
       <section class="reader-stage glass-card">
         <div ref="readerHostRef" class="reader-host"></div>
@@ -2240,33 +2297,17 @@ watch(readerWidth, async () => {
   padding: 8px 24px 28px;
 }
 
-.reader-toolbar {
+.reader-open-toc {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 20px;
-  border-radius: 0;
-  border-left: none;
-  border-right: none;
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
-  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-}
-
-.slide-down-enter-active,
-.slide-down-leave-active {
-  transition: opacity 0.2s ease, transform 0.24s ease;
-}
-
-.slide-down-enter-from,
-.slide-down-leave-to {
-  opacity: 0;
-  transform: translateY(-12px);
+  top: 48px;
+  left: 14px;
+  z-index: 90;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--c-surface-1);
+  box-shadow: var(--c-shadow-md);
 }
 
 .reader-title {
@@ -2289,6 +2330,17 @@ watch(readerWidth, async () => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.reader-actions--toc,
+.toc-display-actions {
+  margin-bottom: 10px;
+}
+
+.toc-display-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .reader-toolbar-title {
@@ -2347,24 +2399,24 @@ watch(readerWidth, async () => {
 }
 
 .header-btn {
-  padding: 8px 14px;
-  border-radius: 10px;
+  padding: 7px 11px;
+  border-radius: 8px;
   border: 1px solid var(--c-border);
-  background: var(--c-bg-light);
+  background: var(--c-surface-1);
   color: var(--c-text);
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
 }
 
 .header-btn:hover {
-  border-color: var(--c-primary);
-  color: var(--c-primary);
+  border-color: var(--c-border-strong);
+  background: var(--c-hover-bg);
 }
 
 .header-btn.primary {
-  background: linear-gradient(135deg, #007AFF, #409CFF);
-  border-color: transparent;
+  background: var(--c-primary);
+  border-color: var(--c-primary);
   color: #fff;
 }
 
@@ -2387,67 +2439,24 @@ watch(readerWidth, async () => {
   display: block;
 }
 
-.reader-mini-meta {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 25;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 280px;
-  padding: 28px 12px 10px;
-  border-radius: 14px;
-}
-
-.reader-mini-title {
-  font-size: 0.92rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: var(--c-text);
-}
-
-.reader-mini-subtitle {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 0.78rem;
-  line-height: 1.45;
-  color: var(--c-text-lighter);
-}
-
 .reader-layout--no-toc .reader-stage {
   width: min(100%, calc(var(--book-reader-host-width) + 160px));
   margin: 0 auto;
 }
 
 .glass-card {
-  background: var(--c-glass-bg);
-  border: 1px solid var(--c-glass-border);
-  box-shadow: var(--c-shadow-lg);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-border);
+  box-shadow: none;
 }
 
 .reader-toc {
   align-self: start;
   position: relative;
   border-radius: 18px;
-  padding: 30px 16px 16px;
+  padding: 14px 14px 16px;
   overflow: auto;
   max-height: calc(100vh - 72px);
-}
-
-.reader-edge-toggle {
-  position: absolute;
-  top: 8px;
-  left: 12px;
-  z-index: 32;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--c-overlay-bg-strong);
-  border-color: var(--c-border);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
 }
 
 .toc-book-meta {
@@ -2500,21 +2509,19 @@ watch(readerWidth, async () => {
   align-items: center;
   gap: 0;
   padding: 0;
-  border-radius: 10px;
-  border: 1px solid var(--c-border);
-  background: var(--c-bg-light);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--c-text);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .toc-node:hover {
-  border-color: var(--c-primary);
-  background: var(--c-primary-light);
+  background: var(--c-hover-bg);
 }
 
 .toc-node--active {
-  border-color: var(--c-primary);
-  background: var(--c-primary-light);
+  background: var(--c-selected-bg);
   color: var(--c-primary-dark);
   font-weight: 700;
 }
@@ -2576,21 +2583,22 @@ watch(readerWidth, async () => {
 
 .reader-stage {
   position: relative;
-  border-radius: 20px;
-  padding: 16px;
+  border-color: transparent;
+  border-radius: 0;
+  padding: 12px;
   min-height: calc(100vh - 72px);
   overflow: hidden;
   width: 100%;
+  background: transparent;
 }
 
 .reader-host {
   width: min(100%, var(--book-reader-host-width));
   height: calc(100vh - 104px);
   margin: 0 auto;
-  border-radius: 14px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--c-bg-light);
-  box-shadow: inset 0 0 0 1px var(--c-border-light);
 }
 
 .stage-state {
@@ -2635,25 +2643,13 @@ watch(readerWidth, async () => {
     padding-top: 8px;
   }
 
-  .reader-toolbar {
-    padding: 8px 12px;
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-
-  .reader-toolbar-title {
-    order: 3;
-    width: 100%;
-  }
-
   .reader-layout {
     grid-template-columns: 1fr;
   }
 
-  .reader-mini-meta {
-    left: 8px;
-    right: 8px;
-    max-width: none;
+  .reader-open-toc {
+    top: 46px;
+    left: 10px;
   }
 
   .reader-toc {

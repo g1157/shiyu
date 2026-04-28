@@ -1,4 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
+import type {
+  ArticleContentKind,
+  DocumentKind,
+  DocumentTranslationItem,
+  SaveDocumentTranslationsRequest,
+} from '../types/document'
 
 // ── Vocabulary ──────────────────────────────────────────
 
@@ -11,6 +17,8 @@ export interface VocabularyItem {
     ebook_id?: string
     ebook_cfi?: string
     ebook_href?: string
+    document_kind?: DocumentKind
+    document_id?: string
     review_count: number
     last_reviewed_at?: number
     created_at: number
@@ -32,6 +40,8 @@ export interface AddVocabularyRequest {
     ebook_id?: string
     ebook_cfi?: string
     ebook_href?: string
+    document_kind?: DocumentKind
+    document_id?: string
 }
 
 export async function getVocabulary(): Promise<VocabularyItem[]> {
@@ -100,6 +110,8 @@ export interface SentenceItem {
     ebook_id?: string
     ebook_cfi?: string
     ebook_href?: string
+    document_kind?: DocumentKind
+    document_id?: string
     review_count: number
     last_reviewed_at?: number
     created_at: number
@@ -120,6 +132,8 @@ export interface AddSentenceRequest {
     ebook_id?: string
     ebook_cfi?: string
     ebook_href?: string
+    document_kind?: DocumentKind
+    document_id?: string
 }
 
 export async function getSentences(): Promise<SentenceItem[]> {
@@ -174,7 +188,6 @@ export async function deleteSetting(key: string): Promise<void> {
 
 // ── Config Pack ─────────────────────────────────────────
 
-/** 导入加密配置包，返回成功导入的配置项数 */
 export async function importConfigPack(filePath: string): Promise<number> {
     return invoke('import_config_pack', { filePath })
 }
@@ -210,6 +223,24 @@ export async function translateArticleStream(
     })
 }
 
+export async function getDocumentTranslations(
+    documentKind: DocumentKind,
+    documentId: string,
+    anchor?: string,
+): Promise<DocumentTranslationItem[]> {
+    return invoke('get_document_translations', {
+        documentKind,
+        documentId,
+        anchor: anchor ?? null,
+    })
+}
+
+export async function saveDocumentTranslations(
+    req: SaveDocumentTranslationsRequest,
+): Promise<DocumentTranslationItem[]> {
+    return invoke('save_document_translations', { req })
+}
+
 // ── Data Import/Export ──────────────────────────────────
 
 export interface ExportData {
@@ -219,6 +250,7 @@ export interface ExportData {
     articles: ArticleItem[]
     ebooks: ExportEbookItem[]
     assets: ExportAssetItem[]
+    translations: DocumentTranslationItem[]
 }
 
 export async function exportAllData(): Promise<ExportData> {
@@ -250,6 +282,7 @@ export interface EbookItem {
     last_read_at?: number
     created_at: number
     source_hash?: string
+    cover_path?: string
 }
 
 export interface ExportEbookItem {
@@ -264,6 +297,8 @@ export interface ExportEbookItem {
     source_hash?: string
     file_name: string
     file_data_base64?: string | null
+    cover_file_name?: string | null
+    cover_data_base64?: string | null
 }
 
 export interface ExportAssetItem {
@@ -308,6 +343,15 @@ export interface ArticleItem {
     description?: string
     word_count: number
     created_at: number
+    content_kind: ArticleContentKind
+    source_kind?: string
+    source_document_id?: string
+    source_document_title?: string
+    source_href?: string
+    source_cfi?: string
+    source_anchor?: string
+    import_source?: string
+    published_at?: number
     mindmap_markdown?: string | null
 }
 
@@ -317,6 +361,15 @@ export interface AddArticleRequest {
     author?: string
     category?: string
     description?: string
+    content_kind?: ArticleContentKind
+    source_kind?: string
+    source_document_id?: string
+    source_document_title?: string
+    source_href?: string
+    source_cfi?: string
+    source_anchor?: string
+    import_source?: string
+    published_at?: number
 }
 
 export interface UpdateArticleContentRequest {

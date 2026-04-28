@@ -16,22 +16,25 @@ impl FromRow for VocabularyItem {
             ebook_id: row.get(5)?,
             ebook_cfi: row.get(6)?,
             ebook_href: row.get(7)?,
-            review_count: row.get(8)?,
-            last_reviewed_at: row.get(9)?,
-            created_at: row.get(10)?,
-            srs_due: row.get(11)?,
-            srs_stability: row.get(12)?,
-            srs_difficulty: row.get(13)?,
-            srs_state: row.get(14)?,
-            srs_lapses: row.get(15)?,
-            srs_reps: row.get(16)?,
-            srs_last_review: row.get(17)?,
+            document_kind: row.get(8)?,
+            document_id: row.get(9)?,
+            review_count: row.get(10)?,
+            last_reviewed_at: row.get(11)?,
+            created_at: row.get(12)?,
+            srs_due: row.get(13)?,
+            srs_stability: row.get(14)?,
+            srs_difficulty: row.get(15)?,
+            srs_state: row.get(16)?,
+            srs_lapses: row.get(17)?,
+            srs_reps: row.get(18)?,
+            srs_last_review: row.get(19)?,
         })
     }
 }
 
 const VOCAB_SELECT: &str =
     "SELECT id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href,
+            document_kind, document_id,
             review_count, last_reviewed_at, created_at, srs_due, srs_stability, srs_difficulty,
             srs_state, srs_lapses, srs_reps, srs_last_review
      FROM vocabulary";
@@ -63,7 +66,7 @@ impl VocabularyRepository {
         article_path: &str,
     ) -> Result<Vec<VocabularyItem>> {
         let sql = format!(
-            "{} WHERE article_path = ?1 ORDER BY created_at DESC",
+            "{} WHERE article_path = ?1 OR (document_kind = 'article' AND document_id = ?1) ORDER BY created_at DESC",
             VOCAB_SELECT
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -81,7 +84,7 @@ impl VocabularyRepository {
         ebook_id: &str,
     ) -> Result<Vec<VocabularyItem>> {
         let sql = format!(
-            "{} WHERE ebook_id = ?1 ORDER BY created_at DESC",
+            "{} WHERE ebook_id = ?1 OR (document_kind = 'ebook' AND document_id = ?1) ORDER BY created_at DESC",
             VOCAB_SELECT
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -120,11 +123,24 @@ impl VocabularyRepository {
     ) -> Result<VocabularyItem> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
+        let document_kind = req.document_kind.or_else(|| {
+            if req.ebook_id.is_some() {
+                Some("ebook".to_string())
+            } else if req.article_path.is_some() {
+                Some("article".to_string())
+            } else {
+                None
+            }
+        });
+        let document_id = req
+            .document_id
+            .or_else(|| req.ebook_id.clone())
+            .or_else(|| req.article_path.clone());
 
         conn.execute(
             "INSERT INTO vocabulary (
-                id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                id, word, meaning, context, article_path, ebook_id, ebook_cfi, ebook_href, document_kind, document_id, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 id,
                 req.word,
@@ -134,6 +150,8 @@ impl VocabularyRepository {
                 req.ebook_id,
                 req.ebook_cfi,
                 req.ebook_href,
+                document_kind,
+                document_id,
                 now
             ],
         )?;
@@ -147,6 +165,8 @@ impl VocabularyRepository {
             ebook_id: req.ebook_id,
             ebook_cfi: req.ebook_cfi,
             ebook_href: req.ebook_href,
+            document_kind,
+            document_id,
             review_count: 0,
             last_reviewed_at: None,
             created_at: now,
@@ -214,17 +234,22 @@ impl VocabularyRepository {
         article_path: &str,
     ) -> Result<usize> {
         conn.execute(
-            "DELETE FROM vocabulary WHERE article_path = ?1",
+            "DELETE FROM vocabulary WHERE article_path = ?1 OR (document_kind = 'article' AND document_id = ?1)",
             [article_path],
+        )
+    }
+
+    pub fn delete_by_ebook(&self, conn: &MutexGuard<Connection>, ebook_id: &str) -> Result<usize> {
+        conn.execute(
+            "DELETE FROM vocabulary WHERE ebook_id = ?1 OR (document_kind = 'ebook' AND document_id = ?1)",
+            [ebook_id],
         )
     }
 
     /// 按 word 分组聚合，用于全局生词本视图
     pub fn find_grouped(&self, conn: &MutexGuard<Connection>) -> Result<Vec<VocabularyGrouped>> {
-        // 先获取所有生词
         let all = self.find_all(conn)?;
 
-        // 按 word（小写）分组
         let mut groups: std::collections::HashMap<String, Vec<VocabularyItem>> =
             std::collections::HashMap::new();
         for item in all {
@@ -232,17 +257,15 @@ impl VocabularyRepository {
             groups.entry(key).or_default().push(item);
         }
 
-        // 转换为 VocabularyGrouped
         let mut result: Vec<VocabularyGrouped> = groups
             .into_iter()
             .map(|(_, mut entries)| {
-                // 按时间倒序：最新在前
                 entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                 let primary_meaning = entries[0].meaning.clone();
                 let word = entries[0].word.clone();
                 let article_count = entries
                     .iter()
-                    .filter_map(|e| e.article_path.as_ref())
+                    .filter_map(|e| e.document_id.as_ref().or(e.article_path.as_ref()))
                     .collect::<std::collections::HashSet<_>>()
                     .len() as u32;
                 let total_review_count: i64 = entries.iter().map(|e| e.review_count).sum();
@@ -259,7 +282,6 @@ impl VocabularyRepository {
             })
             .collect();
 
-        // 按最新条目时间排序
         result.sort_by(|a, b| {
             let a_time = a.entries.first().map(|e| e.created_at).unwrap_or(0);
             let b_time = b.entries.first().map(|e| e.created_at).unwrap_or(0);

@@ -2,6 +2,10 @@
 // 修改结构体字段时，必须同步更新 src/services/api.ts 中的 TypeScript 接口
 use serde::{Deserialize, Serialize};
 
+fn default_article_content_kind() -> String {
+    "article".to_string()
+}
+
 // ── Vocabulary ──────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +18,10 @@ pub struct VocabularyItem {
     pub ebook_id: Option<String>,
     pub ebook_cfi: Option<String>,
     pub ebook_href: Option<String>,
+    #[serde(default)]
+    pub document_kind: Option<String>,
+    #[serde(default)]
+    pub document_id: Option<String>,
     pub review_count: i64,
     pub last_reviewed_at: Option<i64>,
     pub created_at: i64,
@@ -36,6 +44,10 @@ pub struct AddVocabularyRequest {
     pub ebook_id: Option<String>,
     pub ebook_cfi: Option<String>,
     pub ebook_href: Option<String>,
+    #[serde(default)]
+    pub document_kind: Option<String>,
+    #[serde(default)]
+    pub document_id: Option<String>,
 }
 
 /// 全局聚合视图：按 word 分组，展示所有释义和来源文章
@@ -60,6 +72,10 @@ pub struct SentenceItem {
     pub ebook_id: Option<String>,
     pub ebook_cfi: Option<String>,
     pub ebook_href: Option<String>,
+    #[serde(default)]
+    pub document_kind: Option<String>,
+    #[serde(default)]
+    pub document_id: Option<String>,
     pub review_count: i64,
     pub last_reviewed_at: Option<i64>,
     pub created_at: i64,
@@ -81,6 +97,10 @@ pub struct AddSentenceRequest {
     pub ebook_id: Option<String>,
     pub ebook_cfi: Option<String>,
     pub ebook_href: Option<String>,
+    #[serde(default)]
+    pub document_kind: Option<String>,
+    #[serde(default)]
+    pub document_id: Option<String>,
 }
 
 // ── SRS Update ──────────────────────────────────────────
@@ -145,6 +165,7 @@ pub struct EbookItem {
     pub last_read_at: Option<i64>,
     pub created_at: i64,
     pub source_hash: Option<String>,
+    pub cover_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -166,6 +187,24 @@ pub struct ArticleItem {
     pub description: Option<String>,
     pub word_count: i64,
     pub created_at: i64,
+    #[serde(default = "default_article_content_kind")]
+    pub content_kind: String,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub source_document_id: Option<String>,
+    #[serde(default)]
+    pub source_document_title: Option<String>,
+    #[serde(default)]
+    pub source_href: Option<String>,
+    #[serde(default)]
+    pub source_cfi: Option<String>,
+    #[serde(default)]
+    pub source_anchor: Option<String>,
+    #[serde(default)]
+    pub import_source: Option<String>,
+    #[serde(default)]
+    pub published_at: Option<i64>,
     #[serde(default)]
     pub mindmap_markdown: Option<String>,
 }
@@ -177,6 +216,24 @@ pub struct AddArticleRequest {
     pub author: Option<String>,
     pub category: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub content_kind: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub source_document_id: Option<String>,
+    #[serde(default)]
+    pub source_document_title: Option<String>,
+    #[serde(default)]
+    pub source_href: Option<String>,
+    #[serde(default)]
+    pub source_cfi: Option<String>,
+    #[serde(default)]
+    pub source_anchor: Option<String>,
+    #[serde(default)]
+    pub import_source: Option<String>,
+    #[serde(default)]
+    pub published_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,6 +241,34 @@ pub struct UpdateArticleContentRequest {
     pub id: String,
     pub title: String,
     pub content: String,
+}
+
+// ── Document Translations ───────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentTranslationItem {
+    pub document_kind: String,
+    pub document_id: String,
+    pub anchor: String,
+    pub segment_index: i64,
+    pub source_hash: String,
+    pub translation: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveDocumentTranslationEntryRequest {
+    pub segment_index: i64,
+    pub source_hash: String,
+    pub translation: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SaveDocumentTranslationsRequest {
+    pub document_kind: String,
+    pub document_id: String,
+    pub anchor: Option<String>,
+    pub entries: Vec<SaveDocumentTranslationEntryRequest>,
 }
 
 // ── Data Import/Export ───────────────────────────────────
@@ -202,6 +287,10 @@ pub struct ExportEbookItem {
     pub file_name: String,
     #[serde(default)]
     pub file_data_base64: Option<String>,
+    #[serde(default)]
+    pub cover_file_name: Option<String>,
+    #[serde(default)]
+    pub cover_data_base64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,4 +309,6 @@ pub struct ExportData {
     pub ebooks: Vec<ExportEbookItem>,
     #[serde(default)]
     pub assets: Vec<ExportAssetItem>,
+    #[serde(default)]
+    pub translations: Vec<DocumentTranslationItem>,
 }

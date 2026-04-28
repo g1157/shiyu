@@ -14,9 +14,7 @@ function close() { appWindow.close() }
 
 const route = useRoute()
 const settingsStore = useSettingsStore()
-const mascotRoutes = ['/', '/translate', '/epub-import', '/ocr-import', '/data', '/settings']
 const keepAliveRoutes = new Set(['home', 'vocabulary', 'sentences', 'review', 'translate', 'settings', 'guide', 'data'])
-const showMascot = computed(() => mascotRoutes.includes(route.path))
 const currentTheme = computed(() => (settingsStore.theme === 'dark' ? 'dark' : 'light'))
 const themeToggleTitle = computed(() => currentTheme.value === 'dark' ? '切换到浅色模式' : '切换到深色模式')
 const shouldKeepAlive = computed(() => keepAliveRoutes.has(String(route.name || '')))
@@ -105,38 +103,37 @@ onBeforeUnmount(() => {
     </div>
     <GlobalToast />
     <VersionAnnouncement />
-    <img v-if="showMascot" class="app-mascot" src="/mascot.png" alt="mascot" />
   </div>
 </template>
 
 <style>
-/* ── 右下角吉祥物 ── */
-.app-mascot {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  width: 100px;
-  opacity: 0.45;
-  pointer-events: none;
-  z-index: 1;
-  user-select: none;
-  -webkit-user-drag: none;
-}
 :root {
-  --c-text: #1D1D1F;
-  --c-text-lighter: #86868B;
-  --c-bg: #FBFBFD;
-  --c-bg-light: #FFFFFF;
-  --c-bg-lighter: #F5F5F7;
-  --c-border: #E8E8ED;
-  --c-border-light: #F1F1F5;
-  --c-primary: #007AFF;
-  --c-primary-dark: #0066D6;
-  --c-primary-light: rgba(0, 122, 255, 0.08);
-  --c-accent: #007AFF;
-  --c-danger: #FF3B30;
-  --sidebar-width: 56px;
-  --radius: 12px;
+  --c-text: #20201d;
+  --c-text-lighter: #6f6f67;
+  --c-bg: #f7f7f4;
+  --c-bg-light: #ffffff;
+  --c-bg-lighter: #f1f1ed;
+  --c-border: #e2e2dc;
+  --c-border-light: #edede7;
+  --c-border-strong: #cfcfc7;
+  --c-primary: #2f66d0;
+  --c-primary-dark: #2455b5;
+  --c-primary-light: rgba(47, 102, 208, 0.08);
+  --c-accent: #2f66d0;
+  --c-danger: #c73535;
+  --c-sidebar-bg: #f2f2ee;
+  --c-sidebar-border: #dfdfd8;
+  --c-surface-1: #ffffff;
+  --c-surface-2: #f7f7f4;
+  --c-selected-bg: rgba(47, 102, 208, 0.08);
+  --c-hover-bg: rgba(32, 32, 29, 0.05);
+  --c-bg-glow: transparent;
+  --c-accent-soft: rgba(47, 102, 208, 0.06);
+  --c-accent-border: rgba(47, 102, 208, 0.18);
+  --c-accent-pill: rgba(47, 102, 208, 0.09);
+  --c-track-bg: rgba(112, 112, 102, 0.18);
+  --sidebar-width: 212px;
+  --radius: 10px;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-base: 13px;
@@ -152,30 +149,44 @@ onBeforeUnmount(() => {
   --c-overlay-border: rgba(226, 232, 240, 0.88);
   --c-glass-bg: rgba(255, 255, 255, 0.86);
   --c-glass-border: rgba(255, 255, 255, 0.72);
-  --c-shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.08);
+  --c-shadow-lg: 0 12px 28px rgba(32, 32, 29, 0.08);
+  --c-shadow-md: 0 6px 16px rgba(32, 32, 29, 0.05);
 }
 
 :root.dark {
-  --c-text: #D4DCE6;
-  --c-text-lighter: #93A0B0;
-  --c-bg: #0D1117;
-  --c-bg-light: #151B23;
-  --c-bg-lighter: #1B2430;
-  --c-border: #2A3544;
-  --c-border-light: #202938;
-  --c-primary: #4DA3FF;
-  --c-primary-dark: #7BBCFF;
-  --c-primary-light: rgba(77, 163, 255, 0.16);
-  --c-accent: #4DA3FF;
-  --c-danger: #FF6B6B;
+  --c-text: #edf2ff;
+  --c-text-lighter: #96a4bf;
+  --c-bg: #0b1220;
+  --c-bg-light: #111a2e;
+  --c-bg-lighter: #162238;
+  --c-border: #25324a;
+  --c-border-light: #1c273a;
+  --c-border-strong: #355072;
+  --c-primary: #7cb4ff;
+  --c-primary-dark: #5b9cff;
+  --c-primary-light: rgba(124, 180, 255, 0.18);
+  --c-accent: #7cb4ff;
+  --c-danger: #ff7b7b;
+  --c-sidebar-bg: #0c1628;
+  --c-sidebar-border: #1a2841;
+  --c-surface-1: #111b2f;
+  --c-surface-2: #162236;
+  --c-selected-bg: rgba(124, 180, 255, 0.16);
+  --c-hover-bg: rgba(124, 180, 255, 0.08);
+  --c-bg-glow: rgba(91, 156, 255, 0.16);
+  --c-accent-soft: linear-gradient(180deg, rgba(124, 180, 255, 0.14), rgba(124, 180, 255, 0.05));
+  --c-accent-border: rgba(124, 180, 255, 0.28);
+  --c-accent-pill: rgba(124, 180, 255, 0.16);
+  --c-track-bg: rgba(148, 163, 184, 0.18);
   --c-scrollbar-thumb: rgba(148, 163, 184, 0.26);
   --c-scrollbar-thumb-hover: rgba(148, 163, 184, 0.42);
-  --c-overlay-bg: rgba(21, 27, 35, 0.92);
-  --c-overlay-bg-strong: rgba(21, 27, 35, 0.985);
+  --c-overlay-bg: rgba(17, 26, 46, 0.94);
+  --c-overlay-bg-strong: rgba(17, 26, 46, 0.985);
   --c-overlay-border: rgba(71, 85, 105, 0.62);
-  --c-glass-bg: rgba(21, 27, 35, 0.8);
+  --c-glass-bg: rgba(17, 26, 46, 0.82);
   --c-glass-border: rgba(71, 85, 105, 0.34);
-  --c-shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.35);
+  --c-shadow-lg: 0 14px 32px rgba(0, 0, 0, 0.3);
+  --c-shadow-md: 0 8px 18px rgba(0, 0, 0, 0.2);
 }
 
 * {
@@ -224,6 +235,17 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   height: 100vh;
   overflow: hidden;
+  background: transparent;
+}
+
+:root.book-reader-active .sidebar {
+  width: 0;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right: 0;
+  overflow: hidden;
+  transform: translateX(-100%);
 }
 
 .app-right {
@@ -231,13 +253,14 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: transparent;
 }
 
 .custom-titlebar {
-  height: 36px;
+  height: 38px;
   display: flex;
   align-items: center;
-  background: var(--c-bg-lighter);
+  background: var(--c-surface-1);
   border-bottom: 1px solid var(--c-border-light);
   -webkit-app-region: drag;
   flex-shrink: 0;
@@ -266,7 +289,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 .tb-btn:hover {
-  background: var(--c-bg-light);
+  background: var(--c-hover-bg);
   color: var(--c-text);
 }
 
@@ -284,7 +307,7 @@ a { color: inherit; text-decoration: none; }
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--c-bg);
+  background: transparent;
 }
 .app-main::-webkit-scrollbar { width: 5px; }
 .app-main::-webkit-scrollbar-track { background: transparent; }
@@ -326,50 +349,46 @@ a { color: inherit; text-decoration: none; }
   background: var(--c-bg-light);
   border: 1px solid var(--c-border);
   border-radius: var(--radius);
-  padding: 22px 24px;
+  padding: 20px 22px;
   margin-bottom: 14px;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.18s ease;
 }
-.card:hover { border-color: #D1D1D6; }
+.card:hover { border-color: var(--c-border-strong); }
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 36px;
-  padding: 0 16px;
+  height: 34px;
+  padding: 0 14px;
   border-radius: 8px;
   font-size: var(--fs-base);
   font-weight: 600;
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
   white-space: nowrap;
   letter-spacing: -0.01em;
 }
 .btn-primary {
   color: #ffffff;
   background: var(--c-primary);
-  box-shadow: 0 1px 2px rgba(0, 122, 255, 0.2);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
 }
 .btn-primary:hover {
   background: var(--c-primary-dark);
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
 }
-.btn-primary:active { transform: scale(0.97); box-shadow: none; }
+.btn-primary:active { transform: scale(0.98); }
 .btn-outline {
   color: var(--c-text);
   background: var(--c-bg-light);
-  border: 1.5px solid var(--c-border);
+  border-color: var(--c-border);
 }
 .btn-outline:hover {
-  border-color: var(--c-primary);
-  color: var(--c-primary);
-  background: rgba(0, 122, 255, 0.04);
+  border-color: var(--c-border-strong);
+  background: var(--c-hover-bg);
 }
-.btn-outline:active { transform: scale(0.97); }
+.btn-outline:active { transform: scale(0.98); }
 .btn-secondary {
   color: #5856D6;
   background: rgba(88, 86, 214, 0.1);
@@ -413,23 +432,21 @@ a { color: inherit; text-decoration: none; }
 
 .input {
   width: 100%;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
   font-size: var(--fs-base);
   font-family: inherit;
   color: var(--c-text);
-  background: rgba(255, 255, 255, 0.3);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  background: var(--c-bg-light);
+  transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
   outline: none;
 }
 .input:focus {
-  background: rgba(255, 255, 255, 0.5);
-  border-color: rgba(0, 0, 0, 0.15);
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.08);
+  background: var(--c-bg-light);
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px var(--c-primary-light);
 }
 .textarea {
   width: 100%;

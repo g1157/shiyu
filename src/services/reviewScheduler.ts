@@ -25,6 +25,8 @@ import {
   updateVocabularySrs,
   updateSentenceSrs,
 } from './api'
+import type { DocumentRef } from '../types/document'
+import { getDocumentRef } from '../utils/documentSource'
 
 // ── FSRS 引擎配置 ────────────────────────────────────────
 
@@ -50,8 +52,8 @@ export interface ReviewItem {
   back: string
   /** 原文上下文（可选） */
   context?: string
-  /** 来源文章 */
-  articlePath?: string
+  /** 统一来源引用 */
+  documentRef?: DocumentRef | null
   /** 当前 FSRS Card 状态 */
   card: Card
   /** 原始数据引用 */
@@ -114,7 +116,7 @@ function vocabToReviewItem(item: VocabularyItem): ReviewItem {
     front: item.word,
     back: item.meaning,
     context: item.context ?? undefined,
-    articlePath: item.article_path ?? undefined,
+    documentRef: getDocumentRef(item),
     card: dbToCard(item),
     raw: item,
   }
@@ -126,7 +128,7 @@ function sentenceToReviewItem(item: SentenceItem): ReviewItem {
     id: item.id,
     front: item.sentence,
     back: item.explanation,
-    articlePath: item.article_path ?? undefined,
+    documentRef: getDocumentRef(item),
     card: dbToCard(item),
     raw: item,
   }

@@ -18,6 +18,7 @@ impl FromRow for EbookItem {
             last_read_at: row.get(7)?,
             created_at: row.get(8)?,
             source_hash: row.get(9)?,
+            cover_path: row.get(10)?,
         })
     }
 }
@@ -31,7 +32,7 @@ impl EbookRepository {
 
     pub fn find_all(&self, conn: &MutexGuard<Connection>) -> Result<Vec<EbookItem>> {
         let mut stmt = conn.prepare(
-            "SELECT id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash
+            "SELECT id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash, cover_path
              FROM ebooks
              ORDER BY COALESCE(last_read_at, created_at) DESC, created_at DESC"
         )?;
@@ -45,7 +46,7 @@ impl EbookRepository {
 
     pub fn find_by_id(&self, conn: &MutexGuard<Connection>, id: &str) -> Result<Option<EbookItem>> {
         let result = conn.query_row(
-            "SELECT id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash
+            "SELECT id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash, cover_path
              FROM ebooks WHERE id = ?1",
             [id],
             |row| EbookItem::from_row(row),
@@ -64,7 +65,7 @@ impl EbookRepository {
         source_hash: &str,
     ) -> Result<Option<EbookItem>> {
         let result = conn.query_row(
-            "SELECT id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash
+            "SELECT id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash, cover_path
              FROM ebooks WHERE source_hash = ?1",
             [source_hash],
             |row| EbookItem::from_row(row),
@@ -85,14 +86,15 @@ impl EbookRepository {
         author: Option<String>,
         format: String,
         source_hash: Option<String>,
+        cover_path: Option<String>,
     ) -> Result<EbookItem> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
 
         conn.execute(
-            "INSERT INTO ebooks (id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0.0, NULL, NULL, ?6, ?7)",
-            rusqlite::params![id, title, file_path, author, format, now, source_hash],
+            "INSERT INTO ebooks (id, title, file_path, author, format, progress, cfi_position, last_read_at, created_at, source_hash, cover_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0.0, NULL, NULL, ?6, ?7, ?8)",
+            rusqlite::params![id, title, file_path, author, format, now, source_hash, cover_path],
         )?;
 
         Ok(EbookItem {
@@ -106,7 +108,23 @@ impl EbookRepository {
             last_read_at: None,
             created_at: now,
             source_hash,
+            cover_path,
         })
+    }
+
+    pub fn update_cover_path(
+        &self,
+        conn: &MutexGuard<Connection>,
+        id: &str,
+        cover_path: Option<String>,
+    ) -> Result<EbookItem> {
+        conn.execute(
+            "UPDATE ebooks SET cover_path = ?1 WHERE id = ?2",
+            rusqlite::params![cover_path, id],
+        )?;
+
+        self.find_by_id(conn, id)?
+            .map_or(Err(rusqlite::Error::QueryReturnedNoRows), Ok)
     }
 
     pub fn update_progress(
