@@ -1254,10 +1254,11 @@ function scheduleQuickLookupPanelPositionUpdate() {
 }
 
 function dismissSelectionOverlaysOnScroll() {
-  if (!popoverPosition.value.visible && !quickLookupVisible.value && !selection.value.text) return
+  if (!popoverPosition.value.visible && !quickLookupVisible.value) return
   closeQuickLookup()
   quickLookupPanelPosition.value = null
-  clearSelection()
+  popoverPosition.value.visible = false
+  popoverPosition.value.anchor = 'center'
 }
 
 function handleShellScroll() {
@@ -1321,7 +1322,10 @@ function attachContentInteraction(contents: any) {
     updateToolbarVisibility()
   }
   const onWheel = (event: WheelEvent) => {
-    if (!event.ctrlKey) return
+    if (!event.ctrlKey) {
+      dismissSelectionOverlaysOnScroll()
+      return
+    }
     event.preventDefault()
     adjustFontSize(event.deltaY < 0 ? 1 : -1)
   }
@@ -1375,6 +1379,7 @@ function attachContentInteraction(contents: any) {
   contents.document.addEventListener('touchstart', onPointerDown)
   contents.document.addEventListener('mousemove', onPointerMove)
   contents.document.addEventListener('mouseleave', onPointerLeave)
+  contents.document.addEventListener('touchmove', dismissSelectionOverlaysOnScroll, { passive: true })
   contents.window?.addEventListener?.('scroll', onContentScroll, { passive: true })
   contents.window?.addEventListener?.('resize', onViewportResize)
   contents.document.addEventListener('wheel', onWheel, { passive: false })
@@ -1387,6 +1392,7 @@ function attachContentInteraction(contents: any) {
       contents.document.removeEventListener('touchstart', onPointerDown)
       contents.document.removeEventListener('mousemove', onPointerMove)
       contents.document.removeEventListener('mouseleave', onPointerLeave)
+      contents.document.removeEventListener('touchmove', dismissSelectionOverlaysOnScroll)
       contents.window?.removeEventListener?.('scroll', onContentScroll)
       contents.window?.removeEventListener?.('resize', onViewportResize)
       contents.document.removeEventListener('wheel', onWheel)
@@ -1688,7 +1694,10 @@ function updateToolbarVisibility() {
 }
 
 function handleReaderWheel(event: WheelEvent) {
-  if (!event.ctrlKey) return
+  if (!event.ctrlKey) {
+    dismissSelectionOverlaysOnScroll()
+    return
+  }
   event.preventDefault()
   adjustFontSize(event.deltaY < 0 ? 1 : -1)
 }
@@ -2061,6 +2070,7 @@ onMounted(() => {
   document.documentElement.classList.add('book-reader-active')
   void initReader()
   readerShellRef.value?.addEventListener('wheel', handleReaderWheel, { passive: false })
+  readerShellRef.value?.addEventListener('touchmove', dismissSelectionOverlaysOnScroll, { passive: true })
   getShellScrollContainer().addEventListener('scroll', handleShellScroll, { passive: true })
   window.addEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
   window.addEventListener('resize', updateToolbarVisibility)
@@ -2075,6 +2085,7 @@ onActivated(() => {
 onUnmounted(() => {
   document.documentElement.classList.remove('book-reader-active')
   readerShellRef.value?.removeEventListener('wheel', handleReaderWheel)
+  readerShellRef.value?.removeEventListener('touchmove', dismissSelectionOverlaysOnScroll)
   getShellScrollContainer().removeEventListener('scroll', handleShellScroll)
   window.removeEventListener('resize', scheduleQuickLookupPanelPositionUpdate)
   window.removeEventListener('resize', updateToolbarVisibility)
